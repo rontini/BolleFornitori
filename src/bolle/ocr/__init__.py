@@ -16,6 +16,10 @@ def build_engine(cfg: OcrConfig) -> OcrEngine:
         from .paddleocr_vl import PaddleOcrVlEngine
 
         return PaddleOcrVlEngine(cfg)
+    if cfg.engine == "glm_ocr":
+        from .glm_ocr import GlmOcrEngine
+
+        return GlmOcrEngine(cfg)
     raise ValueError(f"Motore OCR non supportato: {cfg.engine!r}")
 
 

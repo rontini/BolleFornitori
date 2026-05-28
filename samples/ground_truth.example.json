@@ -1,0 +1,10 @@
+{
+  "bolla_01.pdf": [
+    { "codice": "ABC123", "quantita": "10" },
+    { "codice": "XYZ-9", "quantita": "2.5" }
+  ],
+  "bolla_02_scansione.png": [
+    { "codice": "ART-0042", "quantita": "100" },
+    { "codice": "ART-0099", "quantita": "5" }
+  ]
+}
