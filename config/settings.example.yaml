@@ -1,0 +1,25 @@
+# Configurazione pipeline bolle fornitori.
+# Copiare in config/settings.yaml e adattare. settings.yaml NON va versionato.
+
+ocr:
+  engine: paddleocr_vl        # paddleocr_vl | glm_ocr | dots_ocr
+  resize_px: 1024             # sweet spot per inferenza su CPU
+  table_mode: true
+  confidence_threshold: 0.80  # righe sotto soglia -> coda di revisione
+
+llm:
+  enabled: true               # LLM piccolo SOLO per testata e casi sporchi
+  base_url: http://localhost:11434
+  model: qwen2.5:7b-instruct-q4_K_M
+  timeout_s: 60
+
+api:
+  base_url: http://localhost:8080   # API REST aziendali (verso Oracle)
+  token: null                       # meglio via env BOLLE_API_TOKEN
+  timeout_s: 30
+  dry_run: true                     # true: non scrive su Oracle (sviluppo)
+
+paths:
+  inbox: ./inbox
+  work: ./work
+  review_queue: ./work/revisione

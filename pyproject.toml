@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bolle-fornitori"
+version = "0.1.0"
+description = "Riconoscimento automatico bolle fornitori e riconciliazione con ordini (locale, CPU)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# Dipendenze core dello skeleton: leggere e senza modelli pesanti.
+dependencies = [
+    "pyyaml>=6.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+# Estrazione da PDF nativi (percorso preferito, niente OCR).
+pdf = ["pymupdf>=1.24"]
+# Motore OCR per le scansioni. Installazione pesante: vedi README.
+ocr = ["paddlepaddle>=2.6", "paddleocr>=2.8", "pillow>=10.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+bolle = "bolle.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+# 'Testata' e un modello di dominio, non una classe di test.
+filterwarnings = ["ignore::pytest.PytestCollectionWarning"]

@@ -1,0 +1,11 @@
+# Dipendenze core dello skeleton (leggere)
+pyyaml>=6.0
+requests>=2.31
+
+# PDF nativi (consigliato: copre i PDF con layer di testo senza OCR)
+pymupdf>=1.24
+
+# --- OCR per le scansioni (pesante, installare separatamente) ---
+# paddlepaddle>=2.6
+# paddleocr>=2.8
+# pillow>=10.0

@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Config locale con segreti (token API)
+config/settings.yaml
+
+# Dati di lavoro / documenti reali (mai versionare bolle dei fornitori)
+inbox/
+work/
+samples/*.pdf
+samples/*.png
+samples/*.jpg
+
+# Modelli scaricati
+models/
+*.onnx
+*.pdmodel
+*.pdiparams
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.idea/
+.vscode/
