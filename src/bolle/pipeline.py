@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from . import router
+from . import fatturapa, router
 from .api_client import AziendaApi
 from .config import Config
 from .header_extractor import extract_header
@@ -51,10 +51,13 @@ class Pipeline:
         kind = router.classify(path)
         log.info("documento %s classificato come %s", path.name, kind.value)
 
-        ocr = self._read_document(path, kind)
-        bolla = Bolla(documento_id=path.stem, kind=kind)
-        bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
-        bolla.righe = parse_lines(ocr, self.cfg.ocr.confidence_threshold)
+        if kind == DocumentKind.XML_FATTURAPA:
+            bolla = fatturapa.parse(path)
+        else:
+            ocr = self._read_document(path, kind)
+            bolla = Bolla(documento_id=path.stem, kind=kind)
+            bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
+            bolla.righe = parse_lines(ocr, self.cfg.ocr.confidence_threshold)
 
         in_revisione = valida_bolla(bolla, self._resolver)
         log.info(
@@ -79,6 +82,4 @@ class Pipeline:
             if self._ocr_engine is None:
                 self._ocr_engine = build_engine(self.cfg.ocr)
             return self._ocr_engine.recognize(path)
-        if kind == DocumentKind.XML_FATTURAPA:
-            raise NotImplementedError("parser XML FatturaPA non ancora implementato")
         raise ValueError(f"tipo documento non gestito: {kind}")
