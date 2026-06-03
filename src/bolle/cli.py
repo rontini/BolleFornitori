@@ -12,7 +12,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .api_client import HttpAziendaApi
+from .api_client import build_api
 from .config import Config
 from .pipeline import Pipeline
 
@@ -54,12 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     cfg = Config.load(args.config)
-    api = HttpAziendaApi(
-        base_url=cfg.api.base_url,
-        token=cfg.api.token,
-        timeout_s=cfg.api.timeout_s,
-        dry_run=cfg.api.dry_run,
-    )
+    api = build_api(cfg.api)
     pipeline = Pipeline(cfg, api)
 
     exit_code = 0

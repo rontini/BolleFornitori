@@ -14,6 +14,7 @@ llm:
   timeout_s: 60
 
 api:
+  backend: http                     # http = API aziendali; memory = nessuna API (offline)
   base_url: http://localhost:8080   # API REST aziendali (verso Oracle)
   token: null                       # meglio via env BOLLE_API_TOKEN
   timeout_s: 30

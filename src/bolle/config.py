@@ -41,6 +41,7 @@ class LlmConfig:
 class ApiConfig:
     """API REST aziendali: unico canale verso Oracle (ordini, cross-ref, anagrafica)."""
 
+    backend: str = "http"               # http | memory (memory = nessuna API esterna)
     base_url: str = "http://localhost:8080"
     token: str | None = None
     timeout_s: int = 30

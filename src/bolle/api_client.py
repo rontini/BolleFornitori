@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .config import ApiConfig
 from .models import Bolla, RigaOrdine
 
 
@@ -108,6 +109,26 @@ class InMemoryAziendaApi:
     def invia_bolla(self, bolla: Bolla) -> str:
         self.inviate.append(bolla)
         return f"MEM:{bolla.documento_id}"
+
+
+def build_api(cfg: ApiConfig) -> AziendaApi:
+    """Seleziona il backend API in base alla configurazione.
+
+    - "memory": backend in-memory, nessuna API esterna. I codici non si risolvono
+      (tutto va in coda di revisione) e nulla viene scritto. Utile per validare
+      l'OCR senza l'Oracle aziendale.
+    - "http": API REST aziendali reali.
+    """
+    if cfg.backend == "memory":
+        return InMemoryAziendaApi()
+    if cfg.backend == "http":
+        return HttpAziendaApi(
+            base_url=cfg.base_url,
+            token=cfg.token,
+            timeout_s=cfg.timeout_s,
+            dry_run=cfg.dry_run,
+        )
+    raise ValueError(f"backend API non supportato: {cfg.backend!r}")
 
 
 def _riga_ordine(d: dict) -> RigaOrdine:
