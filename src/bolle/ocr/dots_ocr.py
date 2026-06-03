@@ -1,16 +1,16 @@
-"""Adapter dots.ocr tramite llama.cpp (motore OCR alternativo, CPU senza AVX).
+"""Adapter dots.ocr / GLM-OCR tramite llama.cpp (motore OCR per CPU senza AVX).
 
-dots.ocr e' un modello vision-language per il parsing documentale (licenza MIT,
-disponibile in GGUF). Gira con llama.cpp, che funziona anche su CPU prive di AVX:
-utile quando PaddleOCR-VL non e' eseguibile (es. VM senza AVX esposto).
-
-L'adapter NON carica il modello in-process: si appoggia a un `llama-server` locale
-con API OpenAI-compatibile e supporto immagini (--mmproj). Cosi' il runtime resta
-fuori da Python e nessun dato esce dalla macchina.
+Si appoggia a un `llama-server` locale con API OpenAI-compatibile e supporto
+immagini (--mmproj). Funziona con qualsiasi modello OCR multimodale servito da
+llama-server (GLM-OCR, dots.ocr, ...). Nessun dato esce dalla macchina.
 
 Le pagine PDF vengono rasterizzate (PyMuPDF) e ridimensionate a ~resize_px; ogni
-pagina viene mandata al modello che restituisce il documento in Markdown. Da li'
+pagina viene inviata al modello che restituisce il documento in Markdown. Da li'
 si ricavano testo (per la testata) e righe (dalle tabelle Markdown).
+
+La risposta viene letta in STREAMING (Server-Sent Events): i token arrivano in
+continuazione, quindi non si incappa nel timeout di lettura su CPU lente, e si
+puo' mostrare l'avanzamento per pagina.
 
 NB: import di requests/fitz pigro -> lo skeleton resta importabile senza runtime.
 """
@@ -18,11 +18,16 @@ NB: import di requests/fitz pigro -> lo skeleton resta importabile senza runtime
 from __future__ import annotations
 
 import base64
+import json
+import logging
 import re
+import sys
 from pathlib import Path
 
 from ..config import OcrConfig
 from .base import OcrEngine, OcrResult, TableCell, TableRow
+
+log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT = (
     "Sei un OCR per bolle di consegna. Trascrivi fedelmente il documento. "
@@ -40,15 +45,17 @@ class DotsOcrEngine(OcrEngine):
 
     def recognize(self, path: str | Path) -> OcrResult:
         images = _render_pages(Path(path), self.cfg.resize_px)
+        total = len(images)
         text_parts: list[str] = []
         rows: list[TableRow] = []
-        for png in images:
-            markdown = self._call_server(png)
+        for i, png in enumerate(images, start=1):
+            log.info("OCR pagina %d/%d", i, total)
+            markdown = self._call_server(png, page_index=i, page_total=total)
             text_parts.append(markdown)
             rows.extend(_markdown_to_rows(markdown))
         return OcrResult(rows=rows, full_text="\n\n".join(text_parts))
 
-    def _call_server(self, png_bytes: bytes) -> str:
+    def _call_server(self, png_bytes: bytes, page_index: int, page_total: int) -> str:
         import requests  # type: ignore
 
         b64 = base64.b64encode(png_bytes).decode("ascii")
@@ -67,15 +74,51 @@ class DotsOcrEngine(OcrEngine):
                 }
             ],
             "temperature": 0.0,
-            "stream": False,
+            "stream": True,
         }
-        resp = requests.post(
-            f"{self.cfg.dots_server_url.rstrip('/')}/v1/chat/completions",
-            json=payload,
-            timeout=self.cfg.request_timeout_s,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        url = f"{self.cfg.dots_server_url.rstrip('/')}/v1/chat/completions"
+        parts: list[str] = []
+        n_tok = 0
+        # connect-timeout breve (server giu' -> errore rapido); read-timeout per
+        # singolo chunk: in streaming i token arrivano di continuo.
+        with requests.post(
+            url, json=payload, stream=True, timeout=(10, self.cfg.request_timeout_s)
+        ) as resp:
+            resp.raise_for_status()
+            for raw in resp.iter_lines(decode_unicode=False):
+                delta = _delta_from_sse_line(raw)
+                if delta is None:
+                    continue
+                parts.append(delta)
+                n_tok += 1
+                _progress(page_index, page_total, n_tok)
+        _progress_end()
+        return "".join(parts)
+
+
+def _delta_from_sse_line(raw: bytes) -> str | None:
+    """Estrae il pezzo di testo da una riga SSE `data: {...}`; None se non pertinente."""
+    if not raw or not raw.startswith(b"data:"):
+        return None
+    data = raw[len(b"data:"):].strip()
+    if not data or data == b"[DONE]":
+        return None
+    try:
+        obj = json.loads(data)
+    except json.JSONDecodeError:
+        return None
+    choices = obj.get("choices") or [{}]
+    return choices[0].get("delta", {}).get("content") or None
+
+
+def _progress(page_index: int, page_total: int, n_tok: int) -> None:
+    sys.stderr.write(f"\r  pagina {page_index}/{page_total} · token letti: {n_tok}   ")
+    sys.stderr.flush()
+
+
+def _progress_end() -> None:
+    sys.stderr.write("\n")
+    sys.stderr.flush()
 
 
 def _render_pages(path: Path, target_px: int) -> list[bytes]:

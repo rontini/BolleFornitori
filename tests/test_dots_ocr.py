@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from bolle.config import OcrConfig
 from bolle.ocr import build_engine
-from bolle.ocr.dots_ocr import _markdown_to_rows
+from bolle.ocr.dots_ocr import _delta_from_sse_line, _markdown_to_rows
 from bolle.parsing import parse_lines
 from bolle.ocr.base import OcrResult
 
@@ -35,3 +35,14 @@ def test_fallback_senza_tabella_markdown():
     rows = _markdown_to_rows(md)
     assert len(rows) == 1
     assert rows[0].cells[0].text == "ART-100"
+
+
+def test_streaming_sse_estrae_il_contenuto():
+    # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
+    line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'
+    assert _delta_from_sse_line(line) == "ART"
+    # Righe non pertinenti -> None (saltate dall'adapter).
+    assert _delta_from_sse_line(b"data: [DONE]") is None
+    assert _delta_from_sse_line(b"") is None
+    assert _delta_from_sse_line(b": keep-alive") is None
+    assert _delta_from_sse_line(b'data: {"choices":[{"delta":{}}]}') is None
