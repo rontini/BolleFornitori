@@ -35,7 +35,7 @@ class PaddleOcrVlEngine(OcrEngine):
             ) from exc
         self._pipeline = PaddleOCRVL()
 
-    def recognize(self, path: str | Path) -> OcrResult:
+    def recognize(self, path: str | Path, pages: list[int] | None = None) -> OcrResult:
         self._ensure_loaded()
         image = _load_and_resize(path, self.cfg.resize_px)
         raw = self._pipeline.predict(image)  # type: ignore[union-attr]

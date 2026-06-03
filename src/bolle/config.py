@@ -23,6 +23,7 @@ class OcrConfig:
     # senza AVX; si appoggia a un llama-server locale OpenAI-compatibile.
     dots_server_url: str = "http://localhost:8080"
     dots_model: str = "dots.ocr"
+    dots_max_tokens: int = 6000         # tetto generazione: evita "dilagamenti"
     request_timeout_s: int = 300
 
 

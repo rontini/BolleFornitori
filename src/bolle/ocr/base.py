@@ -36,6 +36,10 @@ class OcrResult:
 
 class OcrEngine(ABC):
     @abstractmethod
-    def recognize(self, path: str | Path) -> OcrResult:
-        """Esegue OCR in modalita tabella su un documento (gia eventualmente resized)."""
+    def recognize(self, path: str | Path, pages: list[int] | None = None) -> OcrResult:
+        """Esegue OCR in modalita tabella su un documento.
+
+        pages: indici di pagina 0-based da elaborare (None = tutte). Utile per
+        provare/tarare su una singola pagina senza attendere l'intero PDF.
+        """
         raise NotImplementedError

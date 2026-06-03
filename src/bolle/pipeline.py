@@ -46,7 +46,9 @@ class Pipeline:
         self._resolver: CodiceResolver = _ApiResolver(api)
         self._ocr_engine = None  # lazy: si costruisce solo se serve l'OCR
 
-    def process(self, path: str | Path) -> EsitoRiconciliazione:
+    def process(
+        self, path: str | Path, pages: list[int] | None = None
+    ) -> EsitoRiconciliazione:
         path = Path(path)
         kind = router.classify(path)
         log.info("documento %s classificato come %s", path.name, kind.value)
@@ -54,7 +56,7 @@ class Pipeline:
         if kind == DocumentKind.XML_FATTURAPA:
             bolla = fatturapa.parse(path)
         else:
-            ocr = self._read_document(path, kind)
+            ocr = self._read_document(path, kind, pages)
             bolla = Bolla(documento_id=path.stem, kind=kind)
             bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
             bolla.righe = parse_lines(ocr, self.cfg.ocr.confidence_threshold)
@@ -73,7 +75,9 @@ class Pipeline:
             accoda(esito, bolla.documento_id, self.cfg.paths.review_queue)
         return esito
 
-    def _read_document(self, path: Path, kind: DocumentKind) -> OcrResult:
+    def _read_document(
+        self, path: Path, kind: DocumentKind, pages: list[int] | None = None
+    ) -> OcrResult:
         if kind == DocumentKind.PDF_TEXT:
             from .ocr import pdf_text
 
@@ -81,5 +85,5 @@ class Pipeline:
         if kind == DocumentKind.PDF_SCAN:
             if self._ocr_engine is None:
                 self._ocr_engine = build_engine(self.cfg.ocr)
-            return self._ocr_engine.recognize(path)
+            return self._ocr_engine.recognize(path, pages)
         raise ValueError(f"tipo documento non gestito: {kind}")

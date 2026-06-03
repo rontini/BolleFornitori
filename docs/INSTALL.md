@@ -179,3 +179,19 @@ confermerà che dots.ocr legge il documento.
 > Suggerimento: per *vedere* cosa legge il modello a crudo prima di passare dalla
 > pipeline, puoi anche caricare l'immagine nella web UI di llama-server
 > (http://localhost:8080) e incollare il prompt di estrazione.
+
+### Provare su una sola pagina (consigliato per la taratura)
+
+Un PDF con molte pagine richiede ore su CPU senza AVX. Per tarare prompt e
+configurazione conviene lavorare su **una pagina alla volta** con `--pages`:
+
+```cmd
+:: solo pagina 1
+python -m bolle.cli --config config\settings.yaml --pages 1 "C:\...\scan.pdf"
+:: intervallo o lista
+python -m bolle.cli --config config\settings.yaml --pages 1-3 "C:\...\scan.pdf"
+python -m bolle.cli --config config\settings.yaml --pages 1,5,7 "C:\...\scan.pdf"
+```
+
+Le pagine sono **1-based**. Durante l'OCR vedrai l'avanzamento
+`pagina N · token letti: ...` grazie allo streaming.

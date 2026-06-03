@@ -35,7 +35,7 @@ class GlmOcrEngine(OcrEngine):
             ) from exc
         self._model = GLMOCR()
 
-    def recognize(self, path: str | Path) -> OcrResult:
+    def recognize(self, path: str | Path, pages: list[int] | None = None) -> OcrResult:
         self._ensure_loaded()
         image = _load_and_resize(path, self.cfg.resize_px)
         raw = self._model.predict(image)  # type: ignore[union-attr]

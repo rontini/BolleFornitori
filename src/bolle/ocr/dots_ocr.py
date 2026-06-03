@@ -30,12 +30,12 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT = (
-    "Sei un OCR per bolle di consegna. Trascrivi fedelmente il documento. "
-    "Riporta le righe articolo come tabella Markdown con intestazioni "
-    "| codice | descrizione | quantita | prezzo | totale |. "
-    "Non inventare valori; lascia vuota la cella se il dato non c'e'. "
-    "Includi sopra la tabella le informazioni di testata (numero ordine, "
-    "fornitore, numero bolla, data) come testo."
+    "Sei un OCR per bolle di consegna. Estrai SOLO i dati, senza commenti.\n"
+    "Riga 1: numero ordine, fornitore, numero bolla, data (se presenti).\n"
+    "Poi UNA sola tabella Markdown con intestazioni esatte "
+    "| codice | descrizione | quantita | prezzo | totale | e una riga per articolo.\n"
+    "Non descrivere il documento, non aggiungere testo prima o dopo la tabella, "
+    "non ripetere righe. Lascia la cella vuota se il dato non c'e'."
 )
 
 
@@ -43,19 +43,19 @@ class DotsOcrEngine(OcrEngine):
     def __init__(self, cfg: OcrConfig) -> None:
         self.cfg = cfg
 
-    def recognize(self, path: str | Path) -> OcrResult:
-        images = _render_pages(Path(path), self.cfg.resize_px)
-        total = len(images)
+    def recognize(self, path: str | Path, pages: list[int] | None = None) -> OcrResult:
+        rendered = _render_pages(Path(path), self.cfg.resize_px, pages)
+        total = len(rendered)
         text_parts: list[str] = []
         rows: list[TableRow] = []
-        for i, png in enumerate(images, start=1):
-            log.info("OCR pagina %d/%d", i, total)
-            markdown = self._call_server(png, page_index=i, page_total=total)
+        for i, (page_no, png) in enumerate(rendered, start=1):
+            log.info("OCR pagina %d (%d/%d selezionate)", page_no, i, total)
+            markdown = self._call_server(png, page_no)
             text_parts.append(markdown)
             rows.extend(_markdown_to_rows(markdown))
         return OcrResult(rows=rows, full_text="\n\n".join(text_parts))
 
-    def _call_server(self, png_bytes: bytes, page_index: int, page_total: int) -> str:
+    def _call_server(self, png_bytes: bytes, page_no: int) -> str:
         import requests  # type: ignore
 
         b64 = base64.b64encode(png_bytes).decode("ascii")
@@ -74,6 +74,7 @@ class DotsOcrEngine(OcrEngine):
                 }
             ],
             "temperature": 0.0,
+            "max_tokens": self.cfg.dots_max_tokens,
             "stream": True,
         }
         url = f"{self.cfg.dots_server_url.rstrip('/')}/v1/chat/completions"
@@ -91,7 +92,7 @@ class DotsOcrEngine(OcrEngine):
                     continue
                 parts.append(delta)
                 n_tok += 1
-                _progress(page_index, page_total, n_tok)
+                _progress(page_no, n_tok)
         _progress_end()
         return "".join(parts)
 
@@ -111,8 +112,8 @@ def _delta_from_sse_line(raw: bytes) -> str | None:
     return choices[0].get("delta", {}).get("content") or None
 
 
-def _progress(page_index: int, page_total: int, n_tok: int) -> None:
-    sys.stderr.write(f"\r  pagina {page_index}/{page_total} · token letti: {n_tok}   ")
+def _progress(page_no: int, n_tok: int) -> None:
+    sys.stderr.write(f"\r  pagina {page_no} · token letti: {n_tok}   ")
     sys.stderr.flush()
 
 
@@ -121,18 +122,25 @@ def _progress_end() -> None:
     sys.stderr.flush()
 
 
-def _render_pages(path: Path, target_px: int) -> list[bytes]:
-    """Restituisce le pagine come PNG. PDF -> rasterizzazione; immagini -> resize."""
+def _render_pages(
+    path: Path, target_px: int, pages: list[int] | None = None
+) -> list[tuple[int, bytes]]:
+    """Restituisce (numero_pagina_1based, PNG). pages: indici 0-based, None = tutte."""
     if path.suffix.lower() == ".pdf":
         import fitz  # PyMuPDF
 
-        out: list[bytes] = []
+        out: list[tuple[int, bytes]] = []
         with fitz.open(path) as doc:
-            for page in doc:
+            if pages is None:
+                indici = range(len(doc))
+            else:
+                indici = [i for i in pages if 0 <= i < len(doc)]
+            for i in indici:
+                page = doc[i]
                 longest = max(page.rect.width, page.rect.height) or 1
                 zoom = target_px / longest
                 pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
-                out.append(pix.tobytes("png"))
+                out.append((i + 1, pix.tobytes("png")))
         return out
 
     from io import BytesIO
@@ -147,7 +155,7 @@ def _render_pages(path: Path, target_px: int) -> list[bytes]:
         img = img.resize((int(w * scale), int(h * scale)))
     buf = BytesIO()
     img.save(buf, format="PNG")
-    return [buf.getvalue()]
+    return [(1, buf.getvalue())]
 
 
 _SEP_CELL = re.compile(r"^:?-{2,}:?$")
