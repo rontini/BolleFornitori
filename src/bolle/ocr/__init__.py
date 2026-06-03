@@ -20,6 +20,10 @@ def build_engine(cfg: OcrConfig) -> OcrEngine:
         from .glm_ocr import GlmOcrEngine
 
         return GlmOcrEngine(cfg)
+    if cfg.engine == "dots_ocr":
+        from .dots_ocr import DotsOcrEngine
+
+        return DotsOcrEngine(cfg)
     raise ValueError(f"Motore OCR non supportato: {cfg.engine!r}")
 
 

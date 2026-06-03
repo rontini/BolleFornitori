@@ -111,3 +111,71 @@ Output per ciascun motore:
 2. I **20-30 documenti** in `samples/` + il `ground_truth.json` compilato.
 3. Gli output del benchmark: me li incolli e decidiamo insieme il motore e le
    eventuali soglie di confidenza per la coda di revisione.
+
+---
+
+# Alternativa OCR senza AVX — dots.ocr via llama.cpp (Windows)
+
+Da usare quando PaddleOCR-VL non parte perché la CPU/VM non espone l'**AVX**
+(errore `DLL load failed while importing libpaddle`). dots.ocr è un modello
+vision-language (licenza MIT) che gira con **llama.cpp**, il quale funziona anche
+su CPU senza AVX. Nessuna installazione di sistema, nessun diritto admin: solo
+binari portabili e file di modello. Niente esce dalla macchina.
+
+> Nota: senza AVX l'inferenza è più lenta (l'accuratezza **non** cambia). Ottimo
+> per validare; per la produzione a pieno volume resta preferibile abilitare l'AVX.
+
+## 1. Scarica llama.cpp (binario portabile)
+
+Dalle release ufficiali https://github.com/ggml-org/llama.cpp/releases scarica lo
+zip Windows CPU (es. `llama-<versione>-bin-win-cpu-x64.zip`) e scompattalo in una
+cartella, es. `C:\llama`. Contiene `llama-server.exe`. La build CPU include più
+varianti ggml e sceglie a runtime quella compatibile, quindi parte anche senza AVX.
+
+## 2. Scarica il modello dots.ocr (GGUF)
+
+Servono due file GGUF da Hugging Face: il **modello** e il **proiettore vision**
+(`mmproj`). Cerca un repo GGUF di `dots.ocr` e scarica, ad esempio:
+- `dots.ocr-Q4_K_M.gguf` (il modello quantizzato)
+- `mmproj-dots.ocr-f16.gguf` (la parte visione)
+
+Mettili in `C:\llama\models\`.
+
+## 3. Avvia llama-server (lascialo aperto in una finestra)
+
+```cmd
+cd C:\llama
+llama-server.exe -m models\dots.ocr-Q4_K_M.gguf --mmproj models\mmproj-dots.ocr-f16.gguf --port 8080 -c 4096
+```
+
+Quando vedi `server listening on http://127.0.0.1:8080` è pronto. **Non chiudere
+questa finestra**: è il servizio OCR.
+
+## 4. Configura il progetto per usare dots.ocr
+
+In `config\settings.yaml` imposta:
+
+```yaml
+ocr:
+  engine: dots_ocr
+  dots_server_url: http://localhost:8080
+  dots_model: dots.ocr
+```
+
+## 5. Lancia la pipeline sulla bolla
+
+In un **secondo** prompt dei comandi (con la venv attiva, lasciando il server
+acceso nell'altro):
+
+```cmd
+.venv\Scripts\activate.bat
+bolle --config config\settings.yaml "C:\Users\RONTINIM\Downloads\scan_2026-05-28-12-25-06.pdf"
+```
+
+La prima pagina ci mette un po' (CPU senza AVX). Vedrai le righe estratte; codici
+e quantità non verranno "risolti" finché non colleghiamo le API Oracle, ma
+confermerà che dots.ocr legge il documento.
+
+> Suggerimento: per *vedere* cosa legge il modello a crudo prima di passare dalla
+> pipeline, puoi anche caricare l'immagine nella web UI di llama-server
+> (http://localhost:8080) e incollare il prompt di estrazione.

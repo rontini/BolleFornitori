@@ -19,6 +19,11 @@ class OcrConfig:
     resize_px: int = 1024               # sweet spot per inferenza su CPU
     table_mode: bool = True
     confidence_threshold: float = 0.80  # sotto soglia -> coda di revisione
+    # dots.ocr via llama.cpp (usato quando engine == "dots_ocr"). Funziona su CPU
+    # senza AVX; si appoggia a un llama-server locale OpenAI-compatibile.
+    dots_server_url: str = "http://localhost:8080"
+    dots_model: str = "dots.ocr"
+    request_timeout_s: int = 300
 
 
 @dataclass
