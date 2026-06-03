@@ -57,6 +57,7 @@ class Pipeline:
             bolla = fatturapa.parse(path)
         else:
             ocr = self._read_document(path, kind, pages)
+            self._dump_ocr(path.stem, ocr.full_text)
             bolla = Bolla(documento_id=path.stem, kind=kind)
             bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
             bolla.righe = parse_lines(ocr, self.cfg.ocr.confidence_threshold)
@@ -74,6 +75,16 @@ class Pipeline:
         ):
             accoda(esito, bolla.documento_id, self.cfg.paths.review_queue)
         return esito
+
+    def _dump_ocr(self, stem: str, full_text: str) -> None:
+        """Salva l'output grezzo dell'OCR (Markdown) per ispezione/taratura parser."""
+        if not full_text:
+            return
+        out_dir = self.cfg.paths.work / "ocr_raw"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{stem}.md"
+        path.write_text(full_text, encoding="utf-8")
+        log.info("output OCR grezzo salvato in %s", path)
 
     def _read_document(
         self, path: Path, kind: DocumentKind, pages: list[int] | None = None
