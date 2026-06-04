@@ -88,6 +88,25 @@ Nr. Descrizione Quantita U.d.M.
     assert [str(r.quantita) for r in righe] == ["18", "3", "19"]
 
 
+def test_freetext_fallback_codici_a_8_cifre_senza_quantita():
+    # Caso peggiore: il modello trascrive solo i codici commerciali (8 cifre) e
+    # le descrizioni, omettendo le quantita. Il fallback secondario pesca almeno
+    # codici e descrizioni, cosi' non perdiamo le righe articolo.
+    md = """Ordine 260DV00156 del 20/01/2026
+Vs. Ordine Nr. 26402153-OC-00040 del
+99951827 COPERTURA LATERALE (VERN)
+Nr. commessa cliente: 400MAG
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO)
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    codici = [r.codice_letto for r in righe]
+    assert codici == ["99951827", "99928399"]
+    assert all(r.quantita is None for r in righe)
+    assert "COPERTURA" in (righe[0].descrizione or "")
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'

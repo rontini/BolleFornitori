@@ -31,17 +31,24 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT = (
-    "Trascrivi questa bolla in due parti.\n"
-    "1) TESTATA: prima della tabella, trascrivi una riga per ciascun campo "
-    "presente sulla pagina, esattamente come scritto: ragione sociale del "
-    "fornitore, numero del documento di trasporto/DDT, data, "
-    "'Ordine <numero>' (riferimento interno fornitore), "
-    "'Vs. Ordine Nr. <numero>' (ordine del cliente).\n"
-    "2) ARTICOLI: una sola tabella Markdown a pipe, con le intestazioni "
-    "ESATTE presenti sulla pagina (es. | Nr. | Descrizione | Quantita | U.d.M. |) "
-    "e la riga separatrice | --- | --- | --- | --- | subito sotto. Una riga "
-    "per ogni articolo, copiando fedelmente codice, descrizione e quantita. "
-    "Niente testo dopo la tabella. Niente sezioni colli/peso/firme/vettore."
+    "Trascrivi questa bolla in DUE blocchi, in quest'ordine.\n"
+    "\n"
+    "BLOCCO 1 - testata. Una riga per ciascuno dei campi seguenti se presenti "
+    "sulla pagina, copiati letteralmente:\n"
+    "Documento Nr.: <numero>\n"
+    "Data: <data>\n"
+    "Fornitore: <ragione sociale>\n"
+    "Ordine fornitore: <numero che segue 'Ordine' o 'Ns. Ordine'>\n"
+    "Vs. Ordine cliente: <numero che segue 'Vs. Ordine' o 'Vostro Ordine'>\n"
+    "\n"
+    "BLOCCO 2 - articoli. UNA tabella Markdown a pipe, con le intestazioni "
+    "ESATTE presenti sulla pagina (es. | Nr. | Descrizione | Quantita | "
+    "U.d.M. |) e la riga separatrice | --- | --- | --- | --- | subito sotto. "
+    "Una riga per ogni articolo: codice (prima colonna, di solito 6 cifre + "
+    "punto + 4 cifre), descrizione, quantita con unita' (es. '18 NR'). "
+    "Non saltare righe. Non riassumere.\n"
+    "\n"
+    "Niente altro testo. Niente sezioni colli/peso/firme/vettore."
 )
 
 
@@ -333,12 +340,18 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
 
 
 # Fallback per quando il modello scivola in testo libero senza tabella a pipe.
-# Cerca, su ogni riga, un codice articolo nel formato del cliente: 6 cifre, punto,
-# 4 cifre (es. 088578.0163), una descrizione e una quantita con unita' (es. "18 NR").
+# Pattern primario: codice 6 cifre + punto + 4 cifre + descrizione + quantita
+# (es. "088578.0163 Bulloni 18 NR"). Pattern secondario, accomodante: 8 cifre +
+# descrizione (es. "99951827 COPERTURA LATERALE"); cattura solo il codice quando
+# il modello ha trascritto solo i codici commerciali ma non le quantita.
 _RE_FREETEXT_RIGA = re.compile(
     r"^(?P<codice>\d{6}\.\d{4})\s+"
     r"(?P<desc>.+?)\s+"
     r"(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG)?\s*$",
+    re.IGNORECASE,
+)
+_RE_FREETEXT_RIGA_NO_QTA = re.compile(
+    r"^(?P<codice>\d{8})\s+(?P<desc>[A-Z][A-Z0-9 .,/()\-]{3,})\s*$",
     re.IGNORECASE,
 )
 
@@ -349,17 +362,24 @@ def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
     out: list[RigaBolla] = []
     for line in markdown.splitlines():
         s = line.strip().strip("|").strip()  # rimuove eventuali bordi pipe residui
-        m = _RE_FREETEXT_RIGA.match(s)
-        if not m:
-            continue
-        out.append(
-            RigaBolla(
-                numero_riga=len(out) + 1,
-                codice_letto=m.group("codice"),
-                descrizione=m.group("desc").strip() or None,
-                quantita=_decimale(m.group("qta")),
+        if m := _RE_FREETEXT_RIGA.match(s):
+            out.append(
+                RigaBolla(
+                    numero_riga=len(out) + 1,
+                    codice_letto=m.group("codice"),
+                    descrizione=m.group("desc").strip() or None,
+                    quantita=_decimale(m.group("qta")),
+                )
             )
-        )
+            continue
+        if m := _RE_FREETEXT_RIGA_NO_QTA.match(s):
+            out.append(
+                RigaBolla(
+                    numero_riga=len(out) + 1,
+                    codice_letto=m.group("codice"),
+                    descrizione=m.group("desc").strip() or None,
+                )
+            )
     return out
 
 
