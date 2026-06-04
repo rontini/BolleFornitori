@@ -60,7 +60,7 @@ class Pipeline:
             self._dump_ocr(path.stem, ocr.full_text)
             bolla = Bolla(documento_id=path.stem, kind=kind)
             bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
-            bolla.righe = parse_lines(ocr, self.cfg.ocr.confidence_threshold)
+            bolla.righe = self._parse_righe(ocr)
 
         in_revisione = valida_bolla(bolla, self._resolver)
         log.info(
@@ -75,6 +75,16 @@ class Pipeline:
         ):
             accoda(esito, bolla.documento_id, self.cfg.paths.review_queue)
         return esito
+
+    def _parse_righe(self, ocr: OcrResult):
+        """Per dots/llama usa il parser per-nome-colonna; altrimenti quello generico."""
+        if self.cfg.ocr.engine == "dots_ocr" and ocr.full_text:
+            from .ocr.dots_ocr import parse_articoli
+
+            righe = parse_articoli(ocr.full_text)
+            if righe:
+                return righe
+        return parse_lines(ocr, self.cfg.ocr.confidence_threshold)
 
     def _dump_ocr(self, stem: str, full_text: str) -> None:
         """Salva l'output grezzo dell'OCR (Markdown) per ispezione/taratura parser."""

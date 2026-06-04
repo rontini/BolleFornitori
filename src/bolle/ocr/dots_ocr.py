@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import OcrConfig
@@ -30,12 +31,15 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT = (
-    "Sei un OCR per bolle di consegna. Estrai SOLO i dati, senza commenti.\n"
+    "Sei un OCR per bolle di consegna (DDT). Estrai SOLO i dati, senza commenti.\n"
     "Riga 1: numero ordine, fornitore, numero bolla, data (se presenti).\n"
-    "Poi UNA sola tabella Markdown con intestazioni esatte "
-    "| codice | descrizione | quantita | prezzo | totale | e una riga per articolo.\n"
+    "Poi UNA sola tabella Markdown con queste colonne (in quest'ordine):\n"
+    "| codice | descrizione | quantita | udm | prezzo | totale |\n"
+    "Una riga per articolo. Lascia la cella vuota se il dato non c'e' nel "
+    "documento (es. in un DDT mancano prezzo e totale). Non inventare valori. "
     "Non descrivere il documento, non aggiungere testo prima o dopo la tabella, "
-    "non ripetere righe. Lascia la cella vuota se il dato non c'e'."
+    "non includere righe di colli/peso/firme/vettore: fermati dopo l'ultima "
+    "riga articolo."
 )
 
 
@@ -160,29 +164,174 @@ def _render_pages(
 
 _SEP_CELL = re.compile(r"^:?-{2,}:?$")
 
+# Sinonimi di intestazione che il modello puo' produrre, per colonna logica.
+_HEADER_ALIASES = {
+    "codice": ("codice", "nr.", "nr", "codice articolo", "articolo", "n.", "n"),
+    "descrizione": ("descrizione", "denominazione"),
+    "quantita": ("quantita", "quantità", "qta", "q.ta", "qty"),
+    "udm": ("udm", "u.d.m.", "u.m.", "um"),
+    "prezzo": ("prezzo", "prezzo unitario", "prezzo unit."),
+    "totale": ("totale", "importo", "totale riga"),
+}
+
+
+def _normalize_header(text: str) -> str | None:
+    """Mappa un testo di intestazione a uno dei nomi logici di colonna (o None)."""
+    t = text.strip().lower().rstrip(".:")
+    for key, aliases in _HEADER_ALIASES.items():
+        if t in aliases:
+            return key
+    return None
+
+
+@dataclass
+class _Table:
+    columns: list[str | None]                # nome logico per colonna (None = ignota)
+    rows: list[list[str]]                    # celle delle sole righe dati
+
+
+def _extract_articoli_table(markdown: str) -> _Table | None:
+    """Trova la PRIMA tabella articoli e ritorna intestazione + righe.
+
+    Logica: si entra in una "tabella" quando si incontra una riga separatrice
+    `| --- | --- |`. La riga immediatamente sopra e' l'header. Si raccolgono le
+    righe successive finche' (a) finiscono le righe `|...|`, oppure (b) cambia
+    il numero di colonne, oppure (c) compare una riga non-articolo (colli/peso/
+    firme/vettore): a quel punto la tabella articoli e' finita.
+    """
+    lines = markdown.splitlines()
+    header_idx = None
+    n_cols = None
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not (s.startswith("|") and s.endswith("|") and s.count("|") >= 2):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if all(_SEP_CELL.match(c) for c in cells if c):
+            header_idx = i - 1
+            n_cols = len(cells)
+            data_start = i + 1
+            break
+    if header_idx is None or n_cols is None:
+        return None
+
+    header_cells = [c.strip() for c in lines[header_idx].strip().strip("|").split("|")]
+    columns = [_normalize_header(c) for c in header_cells]
+
+    rows: list[list[str]] = []
+    for line in lines[data_start:]:
+        s = line.strip()
+        if not (s.startswith("|") and s.endswith("|")):
+            break
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if len(cells) != n_cols:
+            break  # cambio di tabella (es. colli/peso): articoli finiti
+        if _is_non_articolo(cells, columns):
+            break
+        if all(not c for c in cells):
+            continue
+        rows.append(cells)
+    return _Table(columns=columns, rows=rows)
+
+
+_NON_ARTICOLO_HINTS = (
+    "colli",
+    "peso",
+    "vettore",
+    "trasporto",
+    "destinatario",
+    "firma",
+    "asporto",
+    "spediz",
+    "località",
+    "localita",
+    "volume",
+)
+
+
+def _is_non_articolo(cells: list[str], columns: list[str | None]) -> bool:
+    """True se la riga e' chiaramente del blocco logistico, non un articolo."""
+    joined = " ".join(c.lower() for c in cells)
+    if any(h in joined for h in _NON_ARTICOLO_HINTS):
+        return True
+    # Se la colonna "quantita" non contiene cifre, probabilmente non e' un articolo.
+    try:
+        qi = columns.index("quantita")
+    except ValueError:
+        return False
+    return not any(ch.isdigit() for ch in cells[qi])
+
+
+_RE_NUMERO = re.compile(r"-?\d{1,3}(?:[.\s]?\d{3})*(?:[.,]\d+)?")
+
+
+def _decimale(text: str) -> "Decimal | None":
+    from decimal import Decimal, InvalidOperation
+
+    if not text:
+        return None
+    m = _RE_NUMERO.search(text)
+    if not m:
+        return None
+    norm = m.group(0).replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        return Decimal(norm)
+    except InvalidOperation:
+        return None
+
+
+def parse_articoli(markdown: str) -> list["RigaBolla"]:
+    """Converte l'output Markdown in RigaBolla mappando le colonne per NOME.
+
+    Robusto rispetto a:
+      - colonne in ordine diverso o sotto-insiemi (DDT senza prezzo/totale),
+      - quantita scritte con unita' nella stessa cella ('18 NR' -> 18),
+      - tabelle di colli/peso/firme che seguono quella degli articoli (vengono ignorate).
+    """
+    from ..models import RigaBolla
+
+    table = _extract_articoli_table(markdown)
+    if not table:
+        return []
+
+    def cell(row: list[str], col: str) -> str:
+        try:
+            return row[table.columns.index(col)]
+        except ValueError:
+            return ""
+
+    out: list[RigaBolla] = []
+    for i, row in enumerate(table.rows, start=1):
+        codice = cell(row, "codice")
+        if not codice:
+            continue
+        out.append(
+            RigaBolla(
+                numero_riga=i,
+                codice_letto=codice,
+                descrizione=cell(row, "descrizione") or None,
+                quantita=_decimale(cell(row, "quantita")),
+                prezzo_unitario=_decimale(cell(row, "prezzo")),
+                totale_riga=_decimale(cell(row, "totale")),
+            )
+        )
+    return out
+
 
 def _markdown_to_rows(markdown: str) -> list[TableRow]:
-    """Estrae le righe dalle tabelle Markdown; fallback su split per spazi."""
-    rows: list[TableRow] = []
-    found_table = False
-    for line in markdown.splitlines():
-        s = line.strip()
-        if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
-            cells = [c.strip() for c in s.strip("|").split("|")]
-            if all(_SEP_CELL.match(c) for c in cells if c):
-                # Riga separatrice ---|---: la riga sopra era l'intestazione, scartala.
-                if rows:
-                    rows.pop()
-                found_table = True
-                continue
-            if all(not c for c in cells):
-                continue
-            rows.append(TableRow(cells=[TableCell(text=c, confidence=1.0) for c in cells]))
+    """Fallback generico: rappresentazione "celle grezze" per il parser legacy.
 
-    if found_table:
-        return rows
-
+    Usato dagli adapter OCR diversi da dots/llama (PaddleOCR-VL/GLM-OCR), che
+    passano per src/bolle/parsing.py. Per dots/llama si usa parse_articoli().
+    """
+    table = _extract_articoli_table(markdown)
+    if table is not None:
+        return [
+            TableRow(cells=[TableCell(text=c, confidence=1.0) for c in row])
+            for row in table.rows
+        ]
     # Nessuna tabella Markdown: ripiega separando le colonne sugli spazi multipli.
+    rows: list[TableRow] = []
     for line in markdown.splitlines():
         s = line.strip()
         if not s:
