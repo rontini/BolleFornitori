@@ -30,25 +30,27 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 
 log = logging.getLogger("bolle.ocr.dots")
 
-_PROMPT = (
-    "Trascrivi questa bolla in DUE blocchi, in quest'ordine.\n"
+_PROMPT_TESTATA = (
+    "Estrai SOLO la testata di questa bolla. Una riga per campo, copiata "
+    "letteralmente dalla pagina. NON trascrivere la tabella articoli. "
+    "Niente altro testo.\n"
     "\n"
-    "BLOCCO 1 - testata. Una riga per ciascuno dei campi seguenti se presenti "
-    "sulla pagina, copiati letteralmente:\n"
     "Documento Nr.: <numero>\n"
     "Data: <data>\n"
     "Fornitore: <ragione sociale>\n"
     "Ordine fornitore: <numero che segue 'Ordine' o 'Ns. Ordine'>\n"
-    "Vs. Ordine cliente: <numero che segue 'Vs. Ordine' o 'Vostro Ordine'>\n"
+    "Vs. Ordine cliente: <numero che segue 'Vs. Ordine' o 'Vostro Ordine'>"
+)
+
+_PROMPT_TABELLA = (
+    "Estrai SOLO la tabella articoli di questa bolla come Markdown a pipe. "
+    "NIENTE testata, NIENTE sezioni colli/peso/firme/vettore, NIENTE altro testo.\n"
     "\n"
-    "BLOCCO 2 - articoli. UNA tabella Markdown a pipe, con le intestazioni "
-    "ESATTE presenti sulla pagina (es. | Nr. | Descrizione | Quantita | "
-    "U.d.M. |) e la riga separatrice | --- | --- | --- | --- | subito sotto. "
-    "Una riga per ogni articolo: codice (prima colonna, di solito 6 cifre + "
-    "punto + 4 cifre), descrizione, quantita con unita' (es. '18 NR'). "
-    "Non saltare righe. Non riassumere.\n"
-    "\n"
-    "Niente altro testo. Niente sezioni colli/peso/firme/vettore."
+    "Usa le intestazioni ESATTE presenti sulla pagina (es. | Nr. | Descrizione | "
+    "Quantita | U.d.M. |) e la riga separatrice | --- | --- | --- | --- | "
+    "subito sotto. Una riga per ogni articolo: copia il codice dalla prima "
+    "colonna (di solito 6 cifre + punto + 4 cifre), la descrizione e la "
+    "quantita con unita' (es. '18 NR'). Non saltare righe. Non riassumere."
 )
 
 
@@ -63,12 +65,23 @@ class DotsOcrEngine(OcrEngine):
         rows: list[TableRow] = []
         for i, (page_no, png) in enumerate(rendered, start=1):
             log.info("OCR pagina %d (%d/%d selezionate)", page_no, i, total)
-            markdown = self._call_server(png, page_no)
-            text_parts.append(markdown)
-            rows.extend(_markdown_to_rows(markdown))
+            # Due chiamate focalizzate: testata e tabella. Output del modello su
+            # CPU senza AVX e' instabile con un prompt "fai tutto"; due chiamate
+            # con un solo obiettivo ciascuna sono molto piu' affidabili. Il costo
+            # e' un secondo vision-encode per pagina.
+            testata = self._call_server(
+                png, page_no, "testata", _PROMPT_TESTATA, max_tokens=600
+            )
+            tabella = self._call_server(
+                png, page_no, "tabella", _PROMPT_TABELLA, max_tokens=self.cfg.dots_max_tokens
+            )
+            text_parts.append(testata + "\n\n" + tabella)
+            rows.extend(_markdown_to_rows(tabella))
         return OcrResult(rows=rows, full_text="\n\n".join(text_parts))
 
-    def _call_server(self, png_bytes: bytes, page_no: int) -> str:
+    def _call_server(
+        self, png_bytes: bytes, page_no: int, fase: str, prompt: str, max_tokens: int
+    ) -> str:
         import requests  # type: ignore
 
         b64 = base64.b64encode(png_bytes).decode("ascii")
@@ -78,7 +91,7 @@ class DotsOcrEngine(OcrEngine):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": _PROMPT},
+                        {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
                             "image_url": {"url": f"data:image/png;base64,{b64}"},
@@ -87,7 +100,7 @@ class DotsOcrEngine(OcrEngine):
                 }
             ],
             "temperature": 0.0,
-            "max_tokens": self.cfg.dots_max_tokens,
+            "max_tokens": max_tokens,
             "stream": True,
         }
         url = f"{self.cfg.dots_server_url.rstrip('/')}/v1/chat/completions"
@@ -105,7 +118,7 @@ class DotsOcrEngine(OcrEngine):
                     continue
                 parts.append(delta)
                 n_tok += 1
-                _progress(page_no, n_tok)
+                _progress(page_no, fase, n_tok)
         _progress_end()
         return "".join(parts)
 
@@ -125,8 +138,8 @@ def _delta_from_sse_line(raw: bytes) -> str | None:
     return choices[0].get("delta", {}).get("content") or None
 
 
-def _progress(page_no: int, n_tok: int) -> None:
-    sys.stderr.write(f"\r  pagina {page_no} · token letti: {n_tok}   ")
+def _progress(page_no: int, fase: str, n_tok: int) -> None:
+    sys.stderr.write(f"\r  pagina {page_no} [{fase}] · token letti: {n_tok}   ")
     sys.stderr.flush()
 
 
