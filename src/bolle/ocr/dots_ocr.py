@@ -31,13 +31,17 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT = (
-    "Trascrivi la tabella articoli di questa bolla come Markdown a pipe.\n"
-    "Usa ESATTAMENTE le intestazioni presenti sulla pagina (es. "
-    "| Nr. | Descrizione | Quantita | U.d.M. |). Inserisci sotto le intestazioni "
-    "la riga separatrice | --- | --- | --- | --- |.\n"
-    "Una riga per ogni articolo, copiando fedelmente codice, descrizione e "
-    "quantita come scritti sulla pagina. Non saltare righe. Non riassumere.\n"
-    "Niente testo prima o dopo la tabella. Niente sezioni colli/peso/firme/vettore."
+    "Trascrivi questa bolla in due parti.\n"
+    "1) TESTATA: prima della tabella, trascrivi una riga per ciascun campo "
+    "presente sulla pagina, esattamente come scritto: ragione sociale del "
+    "fornitore, numero del documento di trasporto/DDT, data, "
+    "'Ordine <numero>' (riferimento interno fornitore), "
+    "'Vs. Ordine Nr. <numero>' (ordine del cliente).\n"
+    "2) ARTICOLI: una sola tabella Markdown a pipe, con le intestazioni "
+    "ESATTE presenti sulla pagina (es. | Nr. | Descrizione | Quantita | U.d.M. |) "
+    "e la riga separatrice | --- | --- | --- | --- | subito sotto. Una riga "
+    "per ogni articolo, copiando fedelmente codice, descrizione e quantita. "
+    "Niente testo dopo la tabella. Niente sezioni colli/peso/firme/vettore."
 )
 
 

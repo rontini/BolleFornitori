@@ -22,7 +22,8 @@ def accoda(esito: EsitoRiconciliazione, bolla_id: str, directory: str | Path) ->
     out = d / f"{bolla_id}.json"
     payload = {
         "bolla_id": bolla_id,
-        "numero_ordine": esito.numero_ordine,
+        "numero_ordine": esito.numero_ordine,                     # ordine del cliente
+        "numero_ordine_fornitore": esito.numero_ordine_fornitore, # rif. interno fornitore
         "proposte": [asdict(p) for p in esito.proposte],
         "righe_in_revisione": [asdict(r) for r in esito.righe_in_revisione],
     }
