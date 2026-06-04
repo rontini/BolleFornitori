@@ -31,15 +31,13 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT = (
-    "Sei un OCR per bolle di consegna (DDT). Estrai SOLO i dati, senza commenti.\n"
-    "Riga 1: numero ordine, fornitore, numero bolla, data (se presenti).\n"
-    "Poi UNA sola tabella Markdown con queste colonne (in quest'ordine):\n"
-    "| codice | descrizione | quantita | udm | prezzo | totale |\n"
-    "Una riga per articolo. Lascia la cella vuota se il dato non c'e' nel "
-    "documento (es. in un DDT mancano prezzo e totale). Non inventare valori. "
-    "Non descrivere il documento, non aggiungere testo prima o dopo la tabella, "
-    "non includere righe di colli/peso/firme/vettore: fermati dopo l'ultima "
-    "riga articolo."
+    "Trascrivi la tabella articoli di questa bolla come Markdown a pipe.\n"
+    "Usa ESATTAMENTE le intestazioni presenti sulla pagina (es. "
+    "| Nr. | Descrizione | Quantita | U.d.M. |). Inserisci sotto le intestazioni "
+    "la riga separatrice | --- | --- | --- | --- |.\n"
+    "Una riga per ogni articolo, copiando fedelmente codice, descrizione e "
+    "quantita come scritti sulla pagina. Non saltare righe. Non riassumere.\n"
+    "Niente testo prima o dopo la tabella. Niente sezioni colli/peso/firme/vettore."
 )
 
 
@@ -190,28 +188,37 @@ class _Table:
     rows: list[list[str]]                    # celle delle sole righe dati
 
 
-def _extract_articoli_table(markdown: str) -> _Table | None:
-    """Trova la PRIMA tabella articoli e ritorna intestazione + righe.
-
-    Logica: si entra in una "tabella" quando si incontra una riga separatrice
-    `| --- | --- |`. La riga immediatamente sopra e' l'header. Si raccolgono le
-    righe successive finche' (a) finiscono le righe `|...|`, oppure (b) cambia
-    il numero di colonne, oppure (c) compare una riga non-articolo (colli/peso/
-    firme/vettore): a quel punto la tabella articoli e' finita.
-    """
-    lines = markdown.splitlines()
-    header_idx = None
-    n_cols = None
+def _find_header(lines: list[str]) -> tuple[int | None, int | None, int]:
+    """Restituisce (header_idx, n_cols, data_start). Tollerante al separatore mancante."""
+    # 1) Caso pulito: riga separatrice `| --- | --- |`.
     for i, line in enumerate(lines):
         s = line.strip()
         if not (s.startswith("|") and s.endswith("|") and s.count("|") >= 2):
             continue
         cells = [c.strip() for c in s.strip("|").split("|")]
         if all(_SEP_CELL.match(c) for c in cells if c):
-            header_idx = i - 1
-            n_cols = len(cells)
-            data_start = i + 1
-            break
+            return i - 1, len(cells), i + 1
+    # 2) Caso senza separatore: prendi la prima riga `|...|` che contiene almeno
+    #    una intestazione riconosciuta.
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not (s.startswith("|") and s.endswith("|") and s.count("|") >= 2):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if any(_normalize_header(c) for c in cells):
+            return i, len(cells), i + 1
+    return None, None, 0
+
+
+def _extract_articoli_table(markdown: str) -> _Table | None:
+    """Trova la PRIMA tabella articoli e ritorna intestazione + righe.
+
+    Tollerante: l'header puo' essere segnato dalla riga separatrice
+    `| --- | --- |` oppure - se manca - viene desunto dalla prima riga `|...|`
+    che contiene almeno una intestazione conosciuta (Codice/Descrizione/...).
+    """
+    lines = markdown.splitlines()
+    header_idx, n_cols, data_start = _find_header(lines)
     if header_idx is None or n_cols is None:
         return None
 
@@ -286,13 +293,16 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
     Robusto rispetto a:
       - colonne in ordine diverso o sotto-insiemi (DDT senza prezzo/totale),
       - quantita scritte con unita' nella stessa cella ('18 NR' -> 18),
-      - tabelle di colli/peso/firme che seguono quella degli articoli (vengono ignorate).
+      - tabelle di colli/peso/firme che seguono quella degli articoli (vengono ignorate),
+      - assenza della riga separatrice `| --- |` nella tabella Markdown,
+      - output del modello che ricade in testo libero (fallback regex su codice
+        articolo `\\d{6}\\.\\d{4}`).
     """
     from ..models import RigaBolla
 
     table = _extract_articoli_table(markdown)
     if not table:
-        return []
+        return _parse_articoli_freetext(markdown)
 
     def cell(row: list[str], col: str) -> str:
         try:
@@ -313,6 +323,37 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
                 quantita=_decimale(cell(row, "quantita")),
                 prezzo_unitario=_decimale(cell(row, "prezzo")),
                 totale_riga=_decimale(cell(row, "totale")),
+            )
+        )
+    return out
+
+
+# Fallback per quando il modello scivola in testo libero senza tabella a pipe.
+# Cerca, su ogni riga, un codice articolo nel formato del cliente: 6 cifre, punto,
+# 4 cifre (es. 088578.0163), una descrizione e una quantita con unita' (es. "18 NR").
+_RE_FREETEXT_RIGA = re.compile(
+    r"^(?P<codice>\d{6}\.\d{4})\s+"
+    r"(?P<desc>.+?)\s+"
+    r"(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
+    from ..models import RigaBolla
+
+    out: list[RigaBolla] = []
+    for line in markdown.splitlines():
+        s = line.strip().strip("|").strip()  # rimuove eventuali bordi pipe residui
+        m = _RE_FREETEXT_RIGA.match(s)
+        if not m:
+            continue
+        out.append(
+            RigaBolla(
+                numero_riga=len(out) + 1,
+                codice_letto=m.group("codice"),
+                descrizione=m.group("desc").strip() or None,
+                quantita=_decimale(m.group("qta")),
             )
         )
     return out

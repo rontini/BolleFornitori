@@ -60,6 +60,34 @@ def test_parse_articoli_su_markdown_reale_ddt():
     assert all("colli" not in (r.descrizione or "").lower() for r in righe)
 
 
+def test_parse_articoli_tabella_senza_riga_separatrice():
+    md = """| Nr. | Descrizione | Quantita | U.d.M. |
+| 088578.0163 | Bulloni | 18 NR | |
+| 088608.0401 | Carter | 3 NR | |
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    assert [r.codice_letto for r in righe] == ["088578.0163", "088608.0401"]
+    assert [str(r.quantita) for r in righe] == ["18", "3"]
+
+
+def test_parse_articoli_fallback_freetext():
+    # Caso in cui il modello scivola in prosa: nessuna tabella a pipe, ma le
+    # righe articolo sono comunque riconoscibili dal codice e dalla quantita.
+    md = """Documento di trasporto
+Nr. Descrizione Quantita U.d.M.
+088578.0163 Bulloni M8 18 NR
+088608.0401 CARTER LATO ASPIRAZIONE 3 NR
+088553.0077 ASS BRACCIO FISSO 19 NR
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    assert [r.codice_letto for r in righe] == ["088578.0163", "088608.0401", "088553.0077"]
+    assert [str(r.quantita) for r in righe] == ["18", "3", "19"]
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'
