@@ -354,18 +354,22 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
 
 # Fallback per quando il modello scivola in testo libero senza tabella a pipe.
 # Pattern primario: codice 6 cifre + punto + 4 cifre + descrizione + quantita
-# (es. "088578.0163 Bulloni 18 NR"). Pattern secondario, accomodante: 8 cifre +
-# descrizione (es. "99951827 COPERTURA LATERALE"); cattura solo il codice quando
-# il modello ha trascritto solo i codici commerciali ma non le quantita.
+# (es. "088578.0163 Bulloni 18 NR"). Pattern secondario: codice commerciale a
+# 8 cifre seguito dalla descrizione, terminata a "Nr." / "Rf." / "Ordine" /
+# "Vs." (i campi che seguono sulla bolla) o a fine riga. Cattura solo codice
+# e descrizione quando il modello ha omesso la quantita.
+_SENTINELS_FINE_DESC = r"(?:Nr\.|Rf\.|Ordine\s|Vs\.)"
 _RE_FREETEXT_RIGA = re.compile(
-    r"^(?P<codice>\d{6}\.\d{4})\s+"
+    r"(?<!\d)(?P<codice>\d{6}\.\d{4})\s+"
     r"(?P<desc>.+?)\s+"
-    r"(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG)?\s*$",
+    r"(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG)?\b",
     re.IGNORECASE,
 )
 _RE_FREETEXT_RIGA_NO_QTA = re.compile(
-    r"^(?P<codice>\d{8})\s+(?P<desc>[A-Z][A-Z0-9 .,/()\-]{3,})\s*$",
-    re.IGNORECASE,
+    r"(?<!\d)(?P<codice>\d{8})(?!\d)\s+"
+    r"(?P<desc>[A-Z][^\n]*?)"
+    r"(?=\s+" + _SENTINELS_FINE_DESC + r"|\s*$)",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -373,23 +377,32 @@ def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
     from ..models import RigaBolla
 
     out: list[RigaBolla] = []
+    visti: set[str] = set()
     for line in markdown.splitlines():
-        s = line.strip().strip("|").strip()  # rimuove eventuali bordi pipe residui
-        if m := _RE_FREETEXT_RIGA.match(s):
+        s = line.strip().strip("|").strip()
+        if m := _RE_FREETEXT_RIGA.search(s):
+            codice = m.group("codice")
+            if codice in visti:
+                continue
+            visti.add(codice)
             out.append(
                 RigaBolla(
                     numero_riga=len(out) + 1,
-                    codice_letto=m.group("codice"),
+                    codice_letto=codice,
                     descrizione=m.group("desc").strip() or None,
                     quantita=_decimale(m.group("qta")),
                 )
             )
             continue
-        if m := _RE_FREETEXT_RIGA_NO_QTA.match(s):
+        if m := _RE_FREETEXT_RIGA_NO_QTA.search(s):
+            codice = m.group("codice")
+            if codice in visti:
+                continue
+            visti.add(codice)
             out.append(
                 RigaBolla(
                     numero_riga=len(out) + 1,
-                    codice_letto=m.group("codice"),
+                    codice_letto=codice,
                     descrizione=m.group("desc").strip() or None,
                 )
             )

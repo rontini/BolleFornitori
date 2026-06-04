@@ -107,6 +107,29 @@ Nr. commessa cliente: 400MAG
     assert "COPERTURA" in (righe[0].descrizione or "")
 
 
+def test_freetext_fallback_riga_con_metadati_in_coda():
+    # Caso reale: il modello produce per ogni articolo una riga unica con
+    # codice + descrizione + metadati ("Nr. commessa...", "Rf. Vs DDT...",
+    # "Ordine ... del ...", "Vs. Ordine Nr. ...") tutti concatenati.
+    md = """Nr. Descrizione Quantita U.d.M.
+Ordine 260DV00156 del 20/01/2026 Vs. Ordine Nr. 26402153-OC-00040 del
+99951827 COPERTURA LATERALE (VERN) Nr. commessa cliente: 400MAG Rf. Vs DDT 2203 del 24/09/25 - SALDO Rf. Vs DDT 3956 del 17/10/25 - ACCONTO Ordine 260DV00324 del 04/02/2026 Vs. Ordine Nr. OC/26404399 del
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO) Nr. commessa cliente: 400MAG Rf. Vs DDT 26450414 del 09/02/26 - ACCONTO Ordine 260DV00532 del 24/02/2026 Vs. Ordine Nr. OC/26407264 del
+99932839 MANIGLIA MYRAX DX VERN. Nr. commessa cliente: 405MAG Rf. Vs DDT 19 del 13/01/26 - ACCONTO Ordine 260DV00867 del 25/03/2026 Vs. Ordine Nr. OC/26412075 del
+99924671 ASS BRACCIO FISSO TAV MED Rf. Vs DDT del 31/03/26 - ACCONTO Ordine 260DV00900 del 27/03/2026 Vs. Ordine Nr. 26412532-OC-00040 del
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    codici = [r.codice_letto for r in righe]
+    assert codici == ["99951827", "99928399", "99932839", "99924671"]
+    # Le descrizioni devono fermarsi PRIMA di "Nr. commessa" / "Rf. Vs DDT" / etc.
+    assert righe[0].descrizione == "COPERTURA LATERALE (VERN)"
+    assert righe[1].descrizione == "CARTER LATO ASPIRAZIONE SKEM (NERO)"
+    assert righe[2].descrizione == "MANIGLIA MYRAX DX VERN."
+    assert righe[3].descrizione == "ASS BRACCIO FISSO TAV MED"
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'
