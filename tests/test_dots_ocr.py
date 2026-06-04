@@ -130,6 +130,32 @@ Ordine 260DV00156 del 20/01/2026 Vs. Ordine Nr. 26402153-OC-00040 del
     assert righe[3].descrizione == "ASS BRACCIO FISSO TAV MED"
 
 
+def test_filtro_codice_scarta_tabella_fasulla_da_testata_e_pesca_freetext():
+    # Caso reale: la chiamata "testata" produce una tabella Markdown con dati di
+    # testata travestiti da articoli; la chiamata "tabella" produce prosa con i
+    # veri articoli. Il parser deve rifiutare la prima e pescare la seconda.
+    md = """| Nr. | Descrizione | Quantita | U.d.M. |
+| :--- | :--- | :--- | :--- |
+| 26DGT-01995 | CUIPMENT | 180 ogp F.M. | CUTLCONSAI COOP. |
+| | P.IVA | PORTO ASSEGNATO | |
+
+Ordine 26DVDV0156 del 20/01/2026
+Vs. Ordine Nr. 26402153-OC-00040 del
+99951827 COPERTURA LATERALE (VERN) Nr. commessa cliente: 400MAG Rf. Vs DDT ...
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO) Nr. commessa cliente: 400MAG
+99932839 MANIGLIA MYRAX DX VERN. Nr. commessa cliente: 405MAG
+99924671 ASS BRACCIO FISSO TAV MED Rf. Vs DDT del 31/03/26
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    codici = [r.codice_letto for r in righe]
+    # La riga "26DGT-01995" NON deve comparire (non e' un codice articolo).
+    assert "26DGT-01995" not in codici
+    # I 4 articoli veri devono esserci tutti.
+    assert codici == ["99951827", "99928399", "99932839", "99924671"]
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'

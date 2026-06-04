@@ -31,15 +31,15 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 log = logging.getLogger("bolle.ocr.dots")
 
 _PROMPT_TESTATA = (
-    "Estrai SOLO la testata di questa bolla. Una riga per campo, copiata "
-    "letteralmente dalla pagina. NON trascrivere la tabella articoli. "
-    "Niente altro testo.\n"
+    "Trascrivi SOLO i campi seguenti dalla testata di questa bolla, "
+    "uno per riga. NON trascrivere la tabella articoli. Nessun altro testo. "
+    "Stop dopo l'ultima riga.\n"
     "\n"
     "Documento Nr.: <numero>\n"
     "Data: <data>\n"
     "Fornitore: <ragione sociale>\n"
-    "Ordine fornitore: <numero che segue 'Ordine' o 'Ns. Ordine'>\n"
-    "Vs. Ordine cliente: <numero che segue 'Vs. Ordine' o 'Vostro Ordine'>"
+    "Ordine fornitore: <numero dopo 'Ordine' o 'Ns. Ordine'>\n"
+    "Vs. Ordine cliente: <numero dopo 'Vs. Ordine' o 'Vostro Ordine'>"
 )
 
 _PROMPT_TABELLA = (
@@ -75,7 +75,7 @@ class DotsOcrEngine(OcrEngine):
             # con un solo obiettivo ciascuna sono molto piu' affidabili. Il costo
             # e' un secondo vision-encode per pagina.
             testata = self._call_server(
-                png, page_no, "testata", _PROMPT_TESTATA, max_tokens=600
+                png, page_no, "testata", _PROMPT_TESTATA, max_tokens=300
             )
             tabella = self._call_server(
                 png, page_no, "tabella", _PROMPT_TABELLA, max_tokens=self.cfg.dots_max_tokens
@@ -316,6 +316,18 @@ def _decimale(text: str) -> "Decimal | None":
         return None
 
 
+# Codice articolo plausibile: cifre pure (eventualmente con un punto separatore,
+# come 088578.0163). Tutto cio' che contiene lettere o trattini (es. 26DGT-01995
+# = numero DDT, 26ODV00156 = numero ordine) NON e' un codice articolo: viene
+# rifiutato per non scambiare per articoli i pezzi di testata che il modello
+# talvolta vomita in tabelle Markdown fasulle.
+_RE_CODICE_ARTICOLO = re.compile(r"^\d{6,}(?:\.\d{2,})?$")
+
+
+def _is_codice_articolo(text: str) -> bool:
+    return bool(_RE_CODICE_ARTICOLO.match(text.strip()))
+
+
 def parse_articoli(markdown: str) -> list["RigaBolla"]:
     """Converte l'output Markdown in RigaBolla mappando le colonne per NOME.
 
@@ -325,36 +337,40 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
       - tabelle di colli/peso/firme che seguono quella degli articoli (vengono ignorate),
       - assenza della riga separatrice `| --- |` nella tabella Markdown,
       - output del modello che ricade in testo libero (fallback regex su codice
-        articolo `\\d{6}\\.\\d{4}`).
+        articolo `\\d{6}\\.\\d{4}` o `\\d{8}`),
+      - "tabelle fasulle" prodotte dal modello inserendo dati di testata in righe
+        Markdown a pipe (vengono rifiutate dal filtro sul codice articolo).
     """
     from ..models import RigaBolla
 
     table = _extract_articoli_table(markdown)
-    if not table:
-        return _parse_articoli_freetext(markdown)
+    if table:
+        def cell(row: list[str], col: str) -> str:
+            try:
+                return row[table.columns.index(col)]
+            except ValueError:
+                return ""
 
-    def cell(row: list[str], col: str) -> str:
-        try:
-            return row[table.columns.index(col)]
-        except ValueError:
-            return ""
-
-    out: list[RigaBolla] = []
-    for i, row in enumerate(table.rows, start=1):
-        codice = cell(row, "codice")
-        if not codice:
-            continue
-        out.append(
-            RigaBolla(
-                numero_riga=i,
-                codice_letto=codice,
-                descrizione=cell(row, "descrizione") or None,
-                quantita=_decimale(cell(row, "quantita")),
-                prezzo_unitario=_decimale(cell(row, "prezzo")),
-                totale_riga=_decimale(cell(row, "totale")),
+        out: list[RigaBolla] = []
+        for i, row in enumerate(table.rows, start=1):
+            codice = cell(row, "codice").strip()
+            if not _is_codice_articolo(codice):
+                continue  # scarta righe di testata travestite da articoli
+            out.append(
+                RigaBolla(
+                    numero_riga=len(out) + 1,
+                    codice_letto=codice,
+                    descrizione=cell(row, "descrizione") or None,
+                    quantita=_decimale(cell(row, "quantita")),
+                    prezzo_unitario=_decimale(cell(row, "prezzo")),
+                    totale_riga=_decimale(cell(row, "totale")),
+                )
             )
-        )
-    return out
+        if out:
+            return out
+        # Tabella trovata ma senza righe articolo valide: prosegui col fallback.
+
+    return _parse_articoli_freetext(markdown)
 
 
 # Fallback per quando il modello scivola in testo libero senza tabella a pipe.
