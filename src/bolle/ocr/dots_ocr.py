@@ -374,23 +374,21 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
 
 
 # Fallback per quando il modello scivola in testo libero senza tabella a pipe.
-# Pattern primario: codice 6 cifre + punto + 4 cifre + descrizione + quantita
-# (es. "088578.0163 Bulloni 18 NR"). Pattern secondario: codice commerciale a
-# 8 cifre seguito dalla descrizione, terminata a "Nr." / "Rf." / "Ordine" /
-# "Vs." (i campi che seguono sulla bolla) o a fine riga. Cattura solo codice
-# e descrizione quando il modello ha omesso la quantita.
+# Entrambi i pattern richiedono che il codice sia a INIZIO RIGA: cosi' non
+# catturiamo per sbaglio cifre dentro frasi tipo "Vs. Ordine Nr. OC/26404399"
+# o "Rf. Vs DDT 26450414 del 09/02/26" (codici di ordini/DDT, non articoli).
 _SENTINELS_FINE_DESC = r"(?:Nr\.|Rf\.|Ordine\s|Vs\.)"
 _RE_FREETEXT_RIGA = re.compile(
-    r"(?<!\d)(?P<codice>\d{6}\.\d{4})\s+"
+    r"^\s*(?P<codice>\d{6}\.\d{4})\s+"
     r"(?P<desc>.+?)\s+"
     r"(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG)?\b",
     re.IGNORECASE,
 )
 _RE_FREETEXT_RIGA_NO_QTA = re.compile(
-    r"(?<!\d)(?P<codice>\d{8})(?!\d)\s+"
+    r"^\s*(?P<codice>\d{8})(?!\d)\s+"
     r"(?P<desc>[A-Z][^\n]*?)"
     r"(?=\s+" + _SENTINELS_FINE_DESC + r"|\s*$)",
-    re.IGNORECASE | re.MULTILINE,
+    re.IGNORECASE,
 )
 
 

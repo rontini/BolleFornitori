@@ -156,6 +156,26 @@ Vs. Ordine Nr. 26402153-OC-00040 del
     assert codici == ["99951827", "99928399", "99932839", "99924671"]
 
 
+def test_codici_dentro_frasi_non_diventano_articoli():
+    # Numeri a 8 cifre dentro frasi tipo "Vs. Ordine Nr. OC/26404399" o
+    # "Rf. Vs DDT 26450414 del 09/02/26" NON devono essere catturati come
+    # codici articolo: solo i codici a INIZIO RIGA sono righe articolo vere.
+    md = """Vs. Ordine Nr. OC/26404399 del
+Rf. Vs DDT 26450414 del 09/02/26 - ACCONTO
+Vs. Ordine Nr. OC/26407264 del
+99951827 COPERTURA LATERALE (VERN) Nr. commessa cliente: 400MAG
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO) Nr. commessa cliente: 400MAG
+Vs. Ordine Nr. OC/26412075 del
+99924671 ASS BRACCIO FISSO TAV MED Rf. Vs DDT del 31/03/26
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    codici = [r.codice_letto for r in righe]
+    # Solo i 3 articoli veri (a inizio riga), nessun numero d'ordine spurio.
+    assert codici == ["99951827", "99928399", "99924671"]
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'
