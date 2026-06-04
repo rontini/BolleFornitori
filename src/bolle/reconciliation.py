@@ -28,7 +28,10 @@ from .models import (
 
 def riconcilia(bolla: Bolla, api: AziendaApi) -> EsitoRiconciliazione:
     numero_ordine = bolla.testata.numero_ordine
-    esito = EsitoRiconciliazione(numero_ordine=numero_ordine)
+    esito = EsitoRiconciliazione(
+        numero_ordine=numero_ordine,
+        numero_ordine_fornitore=bolla.testata.numero_ordine_fornitore,
+    )
 
     risolte = [r for r in bolla.righe if r.risolto and r.codice_interno]
     esito.righe_in_revisione = [r for r in bolla.righe if not r.risolto]

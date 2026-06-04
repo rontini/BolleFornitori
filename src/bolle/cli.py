@@ -61,7 +61,10 @@ def main(argv: list[str] | None = None) -> int:
     for doc in args.documenti:
         try:
             esito = pipeline.process(Path(doc), pages=pages)
-            print(f"\n=== {doc} (ordine {esito.numero_ordine}) ===")
+            print(
+                f"\n=== {doc} (ordine cliente {esito.numero_ordine} | "
+                f"ordine fornitore {esito.numero_ordine_fornitore}) ==="
+            )
             for p in esito.proposte:
                 print(f"  [{p.tipo.value}] {p.codice_interno or ''} {p.dettaglio}")
             if esito.righe_in_revisione:

@@ -20,8 +20,15 @@ from .models import Testata
 
 _PROMPT = """Sei un estrattore di dati da bolle di consegna fornitori italiane.
 Dal testo seguente estrai SOLO questi campi e rispondi con un oggetto JSON valido
-con esattamente queste chiavi: numero_ordine, fornitore, numero_bolla, data_bolla
-(formato YYYY-MM-DD). Usa null se un campo non e presente. Non inventare valori.
+con esattamente queste chiavi:
+  - numero_ordine: numero d'ordine DEL CLIENTE (sulle bolle italiane appare come
+    "Vs. Ordine" o "Vostro Ordine"). E' quello da abbinare al gestionale aziendale.
+  - numero_ordine_fornitore: numero d'ordine INTERNO del fornitore (appare come
+    "Ordine" o "Ns. Ordine" o "Nostro Ordine").
+  - fornitore: ragione sociale del fornitore.
+  - numero_bolla: numero del documento di trasporto/DDT.
+  - data_bolla: data del documento, formato YYYY-MM-DD.
+Usa null se un campo non e presente. Non inventare valori.
 
 TESTO:
 {text}
@@ -55,21 +62,42 @@ def _extract_via_ollama(full_text: str, cfg: LlmConfig) -> Testata:
     payload = json.loads(resp.json()["response"])
     return Testata(
         numero_ordine=payload.get("numero_ordine"),
+        numero_ordine_fornitore=payload.get("numero_ordine_fornitore"),
         fornitore=payload.get("fornitore"),
         numero_bolla=payload.get("numero_bolla"),
         data_bolla=_parse_date(payload.get("data_bolla")),
     )
 
 
-_RE_ORDINE = re.compile(r"(?:ordine|ns\.?\s*ordine|n[.\s]*ordine|p\.?o\.?)\D{0,8}([A-Z0-9/\-]{3,})", re.I)
-_RE_BOLLA = re.compile(r"(?:bolla|ddt|d\.d\.t\.?|documento)\D{0,8}([A-Z0-9/\-]{2,})", re.I)
+# Vs./Vostro Ordine = ordine del CLIENTE (matching con Oracle).
+# Il "salto" prima del codice permette parole come "Nr." in mezzo, e la cattura
+# vera e' ancorata a un token alfanumerico di almeno 3 caratteri.
+_RE_ORDINE_CLIENTE = re.compile(
+    r"\b(?:vs|vostro)\.?\s*ordine\b[^\n]{0,30}?([A-Z0-9][A-Z0-9/\-]{2,})", re.I
+)
+# Ns./Nostro Ordine o bare "Ordine" = riferimento INTERNO del fornitore.
+_RE_ORDINE_FORN = re.compile(
+    r"\bordine\b[^\n]{0,30}?([A-Z0-9][A-Z0-9/\-]{2,})", re.I
+)
+# Numero della bolla/DDT: richiede che la cattura COMINCI con una cifra, cosi'
+# non agganciamo per sbaglio parole tipo "trasporto" dopo "Documento di...".
+# Il gap puo' scavalcare un newline perche' spesso "Documento di trasporto" e
+# il "Nr. ..." sono su righe diverse.
+_RE_BOLLA = re.compile(
+    r"(?:bolla|ddt|d\.d\.t\.?|documento)[\s\S]{0,40}?(\d[A-Z0-9/\-]{2,})", re.I
+)
 _RE_DATA = re.compile(r"(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})")
 
 
 def _extract_via_regex(full_text: str) -> Testata:
     t = Testata()
-    if m := _RE_ORDINE.search(full_text):
+    if m := _RE_ORDINE_CLIENTE.search(full_text):
         t.numero_ordine = m.group(1)
+    # Per il fornitore cerchiamo "Ordine ..." sul testo "ripulito" dai match
+    # gia' attribuiti al cliente, cosi' non lo ricatturiamo per sbaglio.
+    cleaned = _RE_ORDINE_CLIENTE.sub("VOSTRO_ORDINE", full_text)
+    if m := _RE_ORDINE_FORN.search(cleaned):
+        t.numero_ordine_fornitore = m.group(1)
     if m := _RE_BOLLA.search(full_text):
         t.numero_bolla = m.group(1)
     if m := _RE_DATA.search(full_text):

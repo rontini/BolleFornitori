@@ -29,7 +29,12 @@ class DocumentKind(str, Enum):
 class Testata:
     """Campi di testata estratti semanticamente (per significato, non posizione)."""
 
+    # Numero d'ordine del CLIENTE (sui DDT italiani: "Vs. Ordine" / "Vostro Ordine").
+    # E' quello usato per l'abbinamento con gli ordini sul gestionale aziendale.
     numero_ordine: str | None = None
+    # Numero d'ordine INTERNO del FORNITORE (sui DDT: "Ordine" / "Ns. Ordine").
+    # Utile come riferimento di tracciabilita' verso il fornitore.
+    numero_ordine_fornitore: str | None = None
     fornitore: str | None = None
     numero_bolla: str | None = None
     data_bolla: date | None = None
@@ -87,6 +92,7 @@ class Proposta:
 
 @dataclass
 class EsitoRiconciliazione:
-    numero_ordine: str | None
+    numero_ordine: str | None                            # ordine del cliente
+    numero_ordine_fornitore: str | None = None           # ordine interno del fornitore
     proposte: list[Proposta] = field(default_factory=list)
     righe_in_revisione: list[RigaBolla] = field(default_factory=list)
