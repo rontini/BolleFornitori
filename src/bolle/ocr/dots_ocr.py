@@ -43,14 +43,19 @@ _PROMPT_TESTATA = (
 )
 
 _PROMPT_TABELLA = (
-    "Estrai SOLO la tabella articoli di questa bolla come Markdown a pipe. "
-    "NIENTE testata, NIENTE sezioni colli/peso/firme/vettore, NIENTE altro testo.\n"
+    "Trascrivi la tabella articoli di questa bolla come Markdown a pipe.\n"
     "\n"
-    "Usa le intestazioni ESATTE presenti sulla pagina (es. | Nr. | Descrizione | "
-    "Quantita | U.d.M. |) e la riga separatrice | --- | --- | --- | --- | "
-    "subito sotto. Una riga per ogni articolo: copia il codice dalla prima "
-    "colonna (di solito 6 cifre + punto + 4 cifre), la descrizione e la "
-    "quantita con unita' (es. '18 NR'). Non saltare righe. Non riassumere."
+    "Usa ESATTAMENTE le intestazioni presenti sulla pagina (es. | Nr. | "
+    "Descrizione | Quantita | U.d.M. |). Inserisci sotto le intestazioni la "
+    "riga separatrice | --- | --- | --- | --- |.\n"
+    "\n"
+    "Una riga per ogni articolo, copiando fedelmente codice (prima colonna), "
+    "descrizione e quantita esattamente come scritti sulla pagina. La colonna "
+    "Quantita contiene il NUMERO ordinato (es. 18, 3, 32, 19), eventualmente "
+    "seguito dall'unita' di misura (es. '18 NR'). NON e' un codice articolo. "
+    "Non saltare righe. Non riassumere.\n"
+    "\n"
+    "Niente testo prima o dopo la tabella. Niente sezioni colli/peso/firme/vettore."
 )
 
 
