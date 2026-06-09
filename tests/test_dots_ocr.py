@@ -176,6 +176,42 @@ Vs. Ordine Nr. OC/26412075 del
     assert codici == ["99951827", "99928399", "99924671"]
 
 
+def test_codici_in_markdown_pesca_dotted_e_8_cifre():
+    from bolle.ocr.dots_ocr import _codici_in_markdown
+    md = """088578.0163 Bulloni 18 NR
+99951827 COPERTURA LATERALE
+| 99928399 | CARTER | 3 NR |
+99951827 duplicato ignorato
+Vs. Ordine Nr. OC/26404399 del"""
+    assert _codici_in_markdown(md) == ["088578.0163", "99951827", "99928399"]
+
+
+def test_ha_quantita_riconosce_pipe_e_freetext():
+    from bolle.ocr.dots_ocr import _ha_quantita
+    # Quantita in tabella pipe
+    assert _ha_quantita("| 088578.0163 | Bulloni | 18 | NR |") is True
+    # Quantita in testo libero
+    assert _ha_quantita("088578.0163 Bulloni 18 NR") is True
+    # Senza quantita (solo descrizione)
+    assert _ha_quantita("99951827 COPERTURA LATERALE (VERN)") is False
+
+
+def test_seconda_passata_patcha_le_quantita():
+    # Simulo l'output della 2a passata che il modello aggiunge in fondo.
+    md = """| Nr. | Descrizione | Quantita | U.d.M. |
+| --- | --- | --- | --- |
+| 99951827 | COPERTURA LATERALE (VERN) | | |
+| 99928399 | CARTER LATO ASPIRAZIONE | | |
+
+QTA:99951827=18
+QTA:99928399=3
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+    righe = parse_articoli(md)
+    assert [r.codice_letto for r in righe] == ["99951827", "99928399"]
+    assert [str(r.quantita) for r in righe] == ["18", "3"]
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'

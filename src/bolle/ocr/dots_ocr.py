@@ -66,6 +66,24 @@ class DotsOcrEngine(OcrEngine):
             markdown = self._call_server(
                 png, page_no, "ocr", _PROMPT, max_tokens=self.cfg.dots_max_tokens
             )
+
+            # Recupero quantita' mancanti: se troviamo codici ma il modello
+            # ha omesso le quantita', facciamo una seconda chiamata mirata
+            # sulla stessa immagine elencandogli i codici e chiedendo solo
+            # i numeri. Su CPU senza AVX e' l'unico modo affidabile di
+            # estrarre quel dato che il modello tende a saltare.
+            codici = _codici_in_markdown(markdown)
+            if codici and not _ha_quantita(markdown):
+                log.info("OCR pagina %d: 2a passata mirata sulle quantita'", page_no)
+                qta_md = self._call_server(
+                    png,
+                    page_no,
+                    "qta",
+                    _build_prompt_quantita(codici),
+                    max_tokens=400,
+                )
+                markdown = markdown + "\n\n" + qta_md
+
             text_parts.append(markdown)
             rows.extend(_markdown_to_rows(markdown))
         return OcrResult(rows=rows, full_text="\n\n".join(text_parts))
@@ -274,14 +292,7 @@ _NON_ARTICOLO_HINTS = (
 def _is_non_articolo(cells: list[str], columns: list[str | None]) -> bool:
     """True se la riga e' chiaramente del blocco logistico, non un articolo."""
     joined = " ".join(c.lower() for c in cells)
-    if any(h in joined for h in _NON_ARTICOLO_HINTS):
-        return True
-    # Se la colonna "quantita" non contiene cifre, probabilmente non e' un articolo.
-    try:
-        qi = columns.index("quantita")
-    except ValueError:
-        return False
-    return not any(ch.isdigit() for ch in cells[qi])
+    return any(h in joined for h in _NON_ARTICOLO_HINTS)
 
 
 _RE_NUMERO = re.compile(r"-?\d{1,3}(?:[.\s]?\d{3})*(?:[.,]\d+)?")
@@ -312,6 +323,65 @@ _RE_CODICE_ARTICOLO = re.compile(r"^\d{6,}(?:\.\d{2,})?$")
 
 def _is_codice_articolo(text: str) -> bool:
     return bool(_RE_CODICE_ARTICOLO.match(text.strip()))
+
+
+# Linea generata dalla 2a passata mirata: "QTA:codice=numero".
+_RE_QTA_PATCH = re.compile(r"QTA\s*:\s*(?P<codice>\S+?)\s*=\s*(?P<qta>\d+(?:[.,]\d+)?)", re.I)
+
+
+def _codici_in_markdown(markdown: str) -> list[str]:
+    """Estrae i codici articolo dalle righe del markdown (dotted o 8 cifre, a inizio riga)."""
+    visti: set[str] = set()
+    out: list[str] = []
+    for line in markdown.splitlines():
+        s = line.strip().strip("|").strip()
+        m = re.match(r"^\s*(\d{8}|\d{6}\.\d{4})(?!\d)", s)
+        if m:
+            cod = m.group(1)
+            if cod not in visti:
+                visti.add(cod)
+                out.append(cod)
+    return out
+
+
+def _ha_quantita(markdown: str) -> bool:
+    """Heuristic: il modello ha trascritto quantita' se troviamo un numero piccolo
+    in una cella pipe (es. '| 18 | NR |') o seguito da un'unita' in testo libero
+    (es. '18 NR' a fine riga)."""
+    if re.search(r"\|\s*\d{1,4}\s*\|\s*(?:NR|PZ|N|KG|MT)\b", markdown, re.IGNORECASE):
+        return True
+    if re.search(r"\b\d{1,4}\s+(?:NR|PZ|N|KG|MT)\b", markdown):
+        return True
+    return False
+
+
+def _build_prompt_quantita(codici: list[str]) -> str:
+    elenco = "\n".join(codici)
+    return (
+        "Guarda la tabella articoli di questa bolla. Per ciascuno dei codici "
+        "qui sotto, leggi il NUMERO presente nella colonna 'Quantita' (a destra "
+        "della descrizione). Ignora eventuali spunte (es. '√') e considera solo "
+        "il numero, anche se seguito da unita' di misura tipo 'NR'.\n"
+        "\n"
+        "Rispondi UNA riga per codice nel formato ESATTO:\n"
+        "QTA:<codice>=<numero>\n"
+        "\n"
+        "Niente altro testo. Codici:\n"
+        f"{elenco}"
+    )
+
+
+def _apply_qta_patches(rows: list["RigaBolla"], markdown: str) -> None:
+    """Se il markdown contiene 'QTA:codice=N' (dalla 2a passata), valorizza
+    le quantita' delle righe corrispondenti che ancora ce l'hanno a None."""
+    patches: dict[str, str] = {}
+    for m in _RE_QTA_PATCH.finditer(markdown):
+        patches.setdefault(m.group("codice"), m.group("qta"))
+    if not patches:
+        return
+    for r in rows:
+        if r.quantita is None and r.codice_letto in patches:
+            r.quantita = _decimale(patches[r.codice_letto])
 
 
 def parse_articoli(markdown: str) -> list["RigaBolla"]:
@@ -353,10 +423,13 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
                 )
             )
         if out:
+            _apply_qta_patches(out, markdown)
             return out
         # Tabella trovata ma senza righe articolo valide: prosegui col fallback.
 
-    return _parse_articoli_freetext(markdown)
+    out = _parse_articoli_freetext(markdown)
+    _apply_qta_patches(out, markdown)
+    return out
 
 
 # Fallback per quando il modello scivola in testo libero senza tabella a pipe.
