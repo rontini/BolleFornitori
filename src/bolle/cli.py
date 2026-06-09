@@ -15,6 +15,7 @@ from pathlib import Path
 from .api_client import build_api
 from .config import Config
 from .pipeline import Pipeline
+from .splitter import split_pdf
 
 
 def _parse_pages(spec: str | None) -> list[int] | None:
@@ -59,19 +60,32 @@ def main(argv: list[str] | None = None) -> int:
 
     exit_code = 0
     for doc in args.documenti:
-        try:
-            esito = pipeline.process(Path(doc), pages=pages)
-            print(
-                f"\n=== {doc} (ordine cliente {esito.numero_ordine} | "
-                f"ordine fornitore {esito.numero_ordine_fornitore}) ==="
-            )
-            for p in esito.proposte:
-                print(f"  [{p.tipo.value}] {p.codice_interno or ''} {p.dettaglio}")
-            if esito.righe_in_revisione:
-                print(f"  righe in revisione: {len(esito.righe_in_revisione)}")
-        except Exception as exc:  # noqa: BLE001 - un documento non deve bloccare il flusso
-            logging.getLogger("bolle.cli").exception("errore su %s: %s", doc, exc)
-            exit_code = 1
+        # Splitter: con --pages saltiamo (l'utente sta lavorando su pagine
+        # specifiche); altrimenti proviamo a splittare PDF multi-bolla. E' un
+        # no-op se il PDF ha 1 pagina o se troviamo un solo marker "Pagina 1/N".
+        sub_documenti = [Path(doc)]
+        if pages is None and cfg.ocr.splitter_enabled:
+            try:
+                sub_documenti = split_pdf(Path(doc), cfg.ocr, work_dir=cfg.paths.work / "split")
+            except Exception as exc:  # noqa: BLE001
+                logging.getLogger("bolle.cli").exception(
+                    "splitter fallito su %s, procedo con il file intero: %s", doc, exc
+                )
+
+        for sub in sub_documenti:
+            try:
+                esito = pipeline.process(sub, pages=pages)
+                print(
+                    f"\n=== {sub} (ordine cliente {esito.numero_ordine} | "
+                    f"ordine fornitore {esito.numero_ordine_fornitore}) ==="
+                )
+                for p in esito.proposte:
+                    print(f"  [{p.tipo.value}] {p.codice_interno or ''} {p.dettaglio}")
+                if esito.righe_in_revisione:
+                    print(f"  righe in revisione: {len(esito.righe_in_revisione)}")
+            except Exception as exc:  # noqa: BLE001 - un documento non deve bloccare il flusso
+                logging.getLogger("bolle.cli").exception("errore su %s: %s", sub, exc)
+                exit_code = 1
     return exit_code
 
 

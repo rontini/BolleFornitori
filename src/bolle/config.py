@@ -25,6 +25,11 @@ class OcrConfig:
     dots_model: str = "dots.ocr"
     dots_max_tokens: int = 6000         # tetto generazione: evita "dilagamenti"
     request_timeout_s: int = 300
+    # Splitter PDF multi-bolla. In produzione le bolle arrivano singole quindi
+    # nella stragrande maggioranza dei casi e' un no-op; alziamo bandiera bianca
+    # immediatamente per PDF di 1 pagina o quando non rileviamo piu' di un
+    # marker "Pagina 1/N". Mettilo a False per disattivarlo del tutto.
+    splitter_enabled: bool = True
 
 
 @dataclass

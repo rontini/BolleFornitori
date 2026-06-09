@@ -103,10 +103,10 @@ Moduli sotto `src/bolle/`:
   pronto, vedi cronologia chat).
 
 ## 6. Prossimi passi (in ordine consigliato)
-1. **PDF splitter**: separare il PDF multi-bolla in singole bolle prima
-   dell'OCR. Marker: `Pagina 1/N`, intestazione "DOCUMENTO DI TRASPORTO",
-   cambio fornitore. Riduce hallucinazione + abilita la riconciliazione per
-   bolla.
+1. **[FATTO]** PDF splitter: `src/bolle/splitter.py`. No-op su PDF di 1 pagina
+   o quando non rileva piu' di un marker "Pagina 1/N" (caso comune in
+   produzione). OCR leggero solo sul top 30% di ogni pagina per identificare
+   i confini.
 2. **Parser formato Camozzi** (Vs. CODICE): mapping colonne nuovo, e quando
    c'e' "Vs. CODICE" il `codice_interno` e' gia' risolto -> salta la
    cross-reference.
