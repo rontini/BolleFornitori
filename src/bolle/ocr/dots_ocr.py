@@ -30,19 +30,7 @@ from .base import OcrEngine, OcrResult, TableCell, TableRow
 
 log = logging.getLogger("bolle.ocr.dots")
 
-_PROMPT_TESTATA = (
-    "Trascrivi SOLO i campi seguenti dalla testata di questa bolla, "
-    "uno per riga. NON trascrivere la tabella articoli. Nessun altro testo. "
-    "Stop dopo l'ultima riga.\n"
-    "\n"
-    "Documento Nr.: <numero>\n"
-    "Data: <data>\n"
-    "Fornitore: <ragione sociale>\n"
-    "Ordine fornitore: <numero dopo 'Ordine' o 'Ns. Ordine'>\n"
-    "Vs. Ordine cliente: <numero dopo 'Vs. Ordine' o 'Vostro Ordine'>"
-)
-
-_PROMPT_TABELLA = (
+_PROMPT = (
     "Trascrivi la tabella articoli di questa bolla come Markdown a pipe.\n"
     "\n"
     "Usa ESATTAMENTE le intestazioni presenti sulla pagina (es. | Nr. | "
@@ -70,18 +58,16 @@ class DotsOcrEngine(OcrEngine):
         rows: list[TableRow] = []
         for i, (page_no, png) in enumerate(rendered, start=1):
             log.info("OCR pagina %d (%d/%d selezionate)", page_no, i, total)
-            # Due chiamate focalizzate: testata e tabella. Output del modello su
-            # CPU senza AVX e' instabile con un prompt "fai tutto"; due chiamate
-            # con un solo obiettivo ciascuna sono molto piu' affidabili. Il costo
-            # e' un secondo vision-encode per pagina.
-            testata = self._call_server(
-                png, page_no, "testata", _PROMPT_TESTATA, max_tokens=300
+            # Singola chiamata focalizzata sulla tabella: due chiamate (testata
+            # + tabella) hanno spinto il modello in modalita' prosa e abbiamo
+            # perso le quantita'. La singola chiamata con questo prompt e' stata
+            # gia' dimostrata in grado di produrre una tabella pulita con
+            # quantita' nei test di ieri.
+            markdown = self._call_server(
+                png, page_no, "ocr", _PROMPT, max_tokens=self.cfg.dots_max_tokens
             )
-            tabella = self._call_server(
-                png, page_no, "tabella", _PROMPT_TABELLA, max_tokens=self.cfg.dots_max_tokens
-            )
-            text_parts.append(testata + "\n\n" + tabella)
-            rows.extend(_markdown_to_rows(tabella))
+            text_parts.append(markdown)
+            rows.extend(_markdown_to_rows(markdown))
         return OcrResult(rows=rows, full_text="\n\n".join(text_parts))
 
     def _call_server(
