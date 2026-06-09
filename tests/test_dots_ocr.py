@@ -212,6 +212,66 @@ QTA:99928399=3
     assert [str(r.quantita) for r in righe] == ["18", "3"]
 
 
+def test_codice_articolo_filtro_rifiuta_partita_iva_11_cifre():
+    # P.IVA e Codice Fiscale italiani sono 11 cifre: NON sono codici articolo.
+    from bolle.ocr.dots_ocr import _is_codice_articolo
+    assert _is_codice_articolo("088578.0163") is True
+    assert _is_codice_articolo("99951827") is True   # 8 cifre, codice commerciale
+    assert _is_codice_articolo("00497971200") is False  # 11 cifre = P.IVA
+    assert _is_codice_articolo("00293150371") is False  # 11 cifre = cod. fiscale
+    assert _is_codice_articolo("26DGT-01995") is False  # alfanumerico = numero DDT
+
+
+def test_caso_reale_pagina_1_con_2a_passata_per_posizione():
+    # Output reale: prima la finta tabella di testata (rifiutata dal filtro
+    # codice perche' 00497971200 e' P.IVA), poi gli articoli in prosa, poi la
+    # 2a passata in formato libero. I codici della 2a passata sono diversi
+    # (lato fornitore) ma in stesso numero/ordine -> patch per posizione.
+    md = """| Nr. | Descrizione | Quantita | U.d.M. |
+| :--- | :--- | :--- | :--- |
+| 26DGT-01995 | CeFLA S.C. MEDICAL EQUIPMENT | 180 ogp F.M. | CUTLCONSAI |
+| 00497971200 | P.IVA | PORTO ASSEGNATO | |
+| 00293150371 | Codice Faciale | Vettore | |
+
+Ordine 26DVDV0156 del 20/01/2026
+Vs. Ordine Nr. 26402153-OC-00040 del
+99951827 COPERTURA LATERALE (VERN)
+Nr. commessa cliente: 400MAG
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO)
+99932839 MANIGLIA MYRAX DX VERN.
+99924671 ASS BRACCIO FISSO TAV MED
+
+Nr. Descrizione Quantita U.d.M.
+088578.0163 18 NR
+088608.0401 3 NR
+088632.0127 32 NR
+088553.0077 19 NR
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    codici = [r.codice_letto for r in righe]
+    quantita = [str(r.quantita) for r in righe]
+
+    # I codici letti sono quelli della prima passata (commerciali, gestionale)
+    assert codici == ["99951827", "99928399", "99932839", "99924671"]
+    # Le quantita arrivano dalla 2a passata per posizione
+    assert quantita == ["18", "3", "32", "19"]
+
+
+def test_qta_patch_per_codice_quando_2a_passata_usa_stessi_codici():
+    md = """99951827 COPERTURA LATERALE (VERN) Nr. commessa cliente: 400MAG
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO)
+
+QTA:99951827=18
+QTA:99928399=3
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+    righe = parse_articoli(md)
+    assert [r.codice_letto for r in righe] == ["99951827", "99928399"]
+    assert [str(r.quantita) for r in righe] == ["18", "3"]
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'

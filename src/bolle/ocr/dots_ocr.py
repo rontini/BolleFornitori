@@ -313,20 +313,28 @@ def _decimale(text: str) -> "Decimal | None":
         return None
 
 
-# Codice articolo plausibile: cifre pure (eventualmente con un punto separatore,
-# come 088578.0163). Tutto cio' che contiene lettere o trattini (es. 26DGT-01995
-# = numero DDT, 26ODV00156 = numero ordine) NON e' un codice articolo: viene
-# rifiutato per non scambiare per articoli i pezzi di testata che il modello
-# talvolta vomita in tabelle Markdown fasulle.
-_RE_CODICE_ARTICOLO = re.compile(r"^\d{6,}(?:\.\d{2,})?$")
+# Codice articolo plausibile: solo i due pattern reali osservati nelle bolle:
+# - dddddd.dddd (10 cifre con punto, es. 088578.0163: codice fornitore)
+# - dddddddd    (8 cifre,       es. 99951827:     codice commerciale/cliente)
+# Esclude alfanumerici (numeri DDT, ordini) E P.IVA/codice fiscale italiani
+# (11 cifre), che altrimenti finiscono come "articoli" dalle finte tabelle di
+# testata prodotte dal modello.
+_RE_CODICE_ARTICOLO = re.compile(r"^(?:\d{6}\.\d{4}|\d{8})$")
 
 
 def _is_codice_articolo(text: str) -> bool:
     return bool(_RE_CODICE_ARTICOLO.match(text.strip()))
 
 
-# Linea generata dalla 2a passata mirata: "QTA:codice=numero".
-_RE_QTA_PATCH = re.compile(r"QTA\s*:\s*(?P<codice>\S+?)\s*=\s*(?P<qta>\d+(?:[.,]\d+)?)", re.I)
+# Linee dalla 2a passata mirata sulle quantita'. Due formati accettati:
+#  - quello che chiediamo nel prompt: "QTA:codice=numero"
+#  - quello che il modello a volte preferisce: "<codice> <numero> [unita]"
+#    (es. "088578.0163 18 NR")
+_RE_QTA_KEY = re.compile(r"QTA\s*:\s*(?P<codice>\S+?)\s*=\s*(?P<qta>\d+(?:[.,]\d+)?)", re.I)
+_RE_QTA_FREEFORM = re.compile(
+    r"^\s*(?P<codice>\d{6}\.\d{4}|\d{8})\s+(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG|MT)?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 
 def _codici_in_markdown(markdown: str) -> list[str]:
@@ -372,16 +380,49 @@ def _build_prompt_quantita(codici: list[str]) -> str:
 
 
 def _apply_qta_patches(rows: list["RigaBolla"], markdown: str) -> None:
-    """Se il markdown contiene 'QTA:codice=N' (dalla 2a passata), valorizza
-    le quantita' delle righe corrispondenti che ancora ce l'hanno a None."""
-    patches: dict[str, str] = {}
-    for m in _RE_QTA_PATCH.finditer(markdown):
-        patches.setdefault(m.group("codice"), m.group("qta"))
-    if not patches:
+    """Applica le quantita' lette dalla 2a passata mirata.
+
+    Strategia in due tempi:
+      1. Match esatto per codice (per quando 1a e 2a passata usano lo stesso
+         codice articolo).
+      2. Fallback per POSIZIONE (per quando la 2a passata legge codici diversi
+         da quelli della 1a, ma in stesso numero e ordine: e' il caso comune
+         delle bolle con due codici per articolo).
+    """
+    if not rows:
         return
+
+    # Preferenza: formato 'QTA:codice=N'. Se assente, usa "codice numero unit".
+    sources = list(_RE_QTA_KEY.finditer(markdown))
+    if not sources:
+        sources = list(_RE_QTA_FREEFORM.finditer(markdown))
+    if not sources:
+        return
+
+    qta_by_codice: dict[str, str] = {}
+    qta_in_order: list[str] = []
+    for m in sources:
+        qta_by_codice.setdefault(m.group("codice"), m.group("qta"))
+        qta_in_order.append(m.group("qta"))
+
+    # 1) match per codice esatto
+    matched = 0
     for r in rows:
-        if r.quantita is None and r.codice_letto in patches:
-            r.quantita = _decimale(patches[r.codice_letto])
+        if r.quantita is None and r.codice_letto in qta_by_codice:
+            r.quantita = _decimale(qta_by_codice[r.codice_letto])
+            matched += 1
+
+    # 2) fallback per posizione (solo se non abbiamo matchato nulla per codice
+    #    e il conteggio delle righe combacia perfettamente)
+    if matched == 0:
+        senza_qta = [r for r in rows if r.quantita is None]
+        if senza_qta and len(senza_qta) == len(qta_in_order):
+            log.info(
+                "qta-patch: codici 2a passata diversi, mappo per posizione (%d righe)",
+                len(senza_qta),
+            )
+            for r, q in zip(senza_qta, qta_in_order):
+                r.quantita = _decimale(q)
 
 
 def parse_articoli(markdown: str) -> list["RigaBolla"]:
