@@ -110,6 +110,12 @@ class DotsOcrEngine(OcrEngine):
             ],
             "temperature": 0.0,
             "max_tokens": max_tokens,
+            # Anti-loop: senza penalita' il modello quantizzato su CPU tende a
+            # ripetere la stessa riga di tabella centinaia di volte fino a
+            # saturare max_tokens (visto sulle pagine SOFT/Camozzi del PDF di
+            # prova). 1.2 rompe i loop senza penalizzare le ripetizioni
+            # legittime della struttura tabellare (pipe, unita' 'NR').
+            "repeat_penalty": 1.2,
             "stream": True,
         }
         url = f"{self.cfg.dots_server_url.rstrip('/')}/v1/chat/completions"

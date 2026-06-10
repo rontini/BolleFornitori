@@ -26,10 +26,10 @@ from .config import OcrConfig
 log = logging.getLogger("bolle.splitter")
 
 _PROMPT_HEADER = (
-    "Trascrivi SOLO la prima riga di intestazione del documento di trasporto, "
-    "in particolare il marker di pagina se presente (es. 'Pagina 1/5', "
-    "'Pag 1 di 00002', 'Pagina 1 / 5', 'Pagina 1/1'). Nessun altro testo, "
-    "max una riga."
+    "Cerca in questa intestazione il marker di numerazione pagina, ad esempio "
+    "'Pagina 1/5', 'PAGINA 1 / 5', 'Pag 1 di 00002', 'Pagina 1/1'. "
+    "Trascrivi l'intestazione riga per riga finche' non lo trovi, poi fermati "
+    "subito dopo averlo scritto."
 )
 
 _RE_PAGINA = re.compile(
@@ -134,7 +134,11 @@ def _ocr_top_of_page(page, cfg: OcrConfig) -> str:
             }
         ],
         "temperature": 0.0,
-        "max_tokens": 60,
+        # 250 token: l'intestazione delle bolle (carta intestata + indirizzi)
+        # puo' precedere il marker 'Pagina 1/N' nell'ordine di lettura; con un
+        # tetto troppo basso il modello si ferma prima di arrivarci.
+        "max_tokens": 250,
+        "repeat_penalty": 1.3,
         "stream": False,
     }
     resp = requests.post(

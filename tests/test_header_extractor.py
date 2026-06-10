@@ -33,3 +33,10 @@ def test_solo_ordine_cliente_se_manca_quello_interno():
     t = extract_header(text, _cfg())
     assert t.numero_ordine == "26402153-OC-00040"
     assert t.numero_ordine_fornitore is None
+
+
+def test_ordine_cliente_abbreviato_vs_ord():
+    # Formato Camozzi: "Saldo Vs.ord. 26423188-OK del 26.05.2026"
+    text = "Saldo Vs.ord. 26423188-OK del 26.05.2026\n"
+    t = extract_header(text, _cfg())
+    assert t.numero_ordine == "26423188-OK"

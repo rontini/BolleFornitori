@@ -72,8 +72,10 @@ def _extract_via_ollama(full_text: str, cfg: LlmConfig) -> Testata:
 # Vs./Vostro Ordine = ordine del CLIENTE (matching con Oracle).
 # Il "salto" prima del codice permette parole come "Nr." in mezzo, e la cattura
 # vera e' ancorata a un token alfanumerico di almeno 3 caratteri.
+# Accetta anche le abbreviazioni 'Vs.ord.' / 'Vs. Ord' usate da alcuni
+# fornitori (es. Camozzi: "Saldo Vs.ord. 26423188-OK del 26.05.2026").
 _RE_ORDINE_CLIENTE = re.compile(
-    r"\b(?:vs|vostro)\.?\s*ordine\b[^\n]{0,30}?([A-Z0-9][A-Z0-9/\-]{2,})", re.I
+    r"\b(?:vs|vostro)\.?\s*ord(?:ine)?\b\.?[^\n]{0,30}?([A-Z0-9][A-Z0-9/\-]{2,})", re.I
 )
 # Ns./Nostro Ordine o bare "Ordine" = riferimento INTERNO del fornitore.
 _RE_ORDINE_FORN = re.compile(
