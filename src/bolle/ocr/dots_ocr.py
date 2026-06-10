@@ -331,13 +331,14 @@ def _decimale(text: str) -> "Decimal | None":
         return None
 
 
-# Codice articolo plausibile: solo i due pattern reali osservati nelle bolle:
-# - dddddd.dddd (10 cifre con punto, es. 088578.0163: codice fornitore)
-# - dddddddd    (8 cifre,       es. 99951827:     codice commerciale/cliente)
-# Esclude alfanumerici (numeri DDT, ordini) E P.IVA/codice fiscale italiani
-# (11 cifre), che altrimenti finiscono come "articoli" dalle finte tabelle di
-# testata prodotte dal modello.
-_RE_CODICE_ARTICOLO = re.compile(r"^(?:\d{6}\.\d{4}|\d{8})$")
+# Codice articolo plausibile: solo i pattern reali osservati nelle bolle:
+# - dddddd.dddd       (es. 088578.0163: codice fornitore)
+# - ddddddXXX.dddd    (es. 088552RIP.0077: variante con suffisso lettere, riparazioni)
+# - dddddddd          (es. 99951827: codice commerciale/cliente)
+# Esclude alfanumerici generici (numeri DDT, ordini) E P.IVA/codice fiscale
+# italiani (11 cifre), che altrimenti finiscono come "articoli" dalle finte
+# tabelle di testata prodotte dal modello.
+_RE_CODICE_ARTICOLO = re.compile(r"^(?:\d{6}[A-Z]{0,4}\.\d{4}|\d{8})$", re.IGNORECASE)
 
 
 def _is_codice_articolo(text: str) -> bool:
@@ -512,7 +513,7 @@ def _parse_segment(segment: str) -> list["RigaBolla"]:
 # o "Rf. Vs DDT 26450414 del 09/02/26" (codici di ordini/DDT, non articoli).
 _SENTINELS_FINE_DESC = r"(?:Nr\.|Rf\.|Ordine\s|Vs\.)"
 _RE_FREETEXT_RIGA = re.compile(
-    r"^\s*(?P<codice>\d{6}\.\d{4})\s+"
+    r"^\s*(?P<codice>\d{6}[A-Z]{0,4}\.\d{4})\s+"
     r"(?P<desc>.+?)\s+"
     r"(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG)?\b",
     re.IGNORECASE,
@@ -586,8 +587,10 @@ def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
         if m := _RE_FREETEXT_RIGA.search(s):
             aggiungi(m.group("codice"), m.group("desc"), m.group("qta"))
             continue
-        if m := _RE_CAMOZZI_INLINE.search(s):
-            # codice_interno = Vs. CODICE pre-risolto dalla bolla
+        if (m := _RE_CAMOZZI_INLINE.search(s)) and "comb.nom" not in s.lower():
+            # codice_interno = Vs. CODICE pre-risolto dalla bolla.
+            # Le righe con 'Comb.nom' contengono il codice doganale (nomenclatura
+            # combinata, es. 74122000): NON e' un Vs. CODICE.
             aggiungi(m.group("vscod"), m.group("desc"), m.group("qta"), interno=m.group("vscod"))
             continue
         if m := _RE_FREETEXT_RIGA_NO_QTA.search(s):

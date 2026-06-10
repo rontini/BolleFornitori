@@ -78,13 +78,16 @@ class Pipeline:
         return esito
 
     def _parse_righe(self, ocr: OcrResult):
-        """Per dots/llama usa il parser per-nome-colonna; altrimenti quello generico."""
+        """Per dots/llama usa SOLO il parser per-nome-colonna; per gli altri il generico.
+
+        Niente fallback al parser generico quando parse_articoli non trova
+        nulla: il generico non ha il filtro sul codice articolo e produce
+        righe spazzatura dai pezzi di testata (es. '26DT-01997', 'C0088').
+        Meglio zero righe oneste che righe inventate."""
         if self.cfg.ocr.engine == "dots_ocr" and ocr.full_text:
             from .ocr.dots_ocr import parse_articoli
 
-            righe = parse_articoli(ocr.full_text)
-            if righe:
-                return righe
+            return parse_articoli(ocr.full_text)
         return parse_lines(ocr, self.cfg.ocr.confidence_threshold)
 
     def _dump_esito(self, bolla: Bolla) -> None:

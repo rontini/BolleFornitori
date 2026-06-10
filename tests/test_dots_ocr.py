@@ -391,6 +391,27 @@ def test_descrizione_ripulita_da_pipe_residue():
     assert str(righe[0].quantita) == "32"
 
 
+def test_codice_riparazione_con_suffisso_lettere():
+    # Variante Verniciatura per le riparazioni: 088552RIP.0077.
+    md = "088552RIP.0077 ASS.BRACCIO ORIZZ.CRIC. (VERN) 2 NR\n"
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    assert len(righe) == 1
+    assert righe[0].codice_letto == "088552RIP.0077"
+    assert str(righe[0].quantita) == "2"
+
+
+def test_codice_doganale_comb_nom_non_e_vs_codice():
+    # 'Orig: IT Comb.nom.: 74122000' e righe hallucinate che lo inglobano:
+    # il codice doganale non deve diventare un Vs. CODICE risolto.
+    md = "1511 6/4-M5/K01 RACCORDI RAPIDI 74122000 Orig: IT Comb.nom. PZ 300\n"
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    assert all(r.codice_letto != "74122000" for r in righe)
+
+
 def test_ordini_di_produzione_soft_non_diventano_articoli():
     # Formato SOFT: '26421479 OP U97003102 ...' e' un ordine di produzione.
     md = """26421479 OP U97003102 SED SEG ST 102 BLD ATLANTICO INU 9,000

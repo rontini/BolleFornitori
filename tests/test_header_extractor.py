@@ -40,3 +40,24 @@ def test_ordine_cliente_abbreviato_vs_ord():
     text = "Saldo Vs.ord. 26423188-OK del 26.05.2026\n"
     t = extract_header(text, _cfg())
     assert t.numero_ordine == "26423188-OK"
+
+
+def test_riferimento_normativo_dpr_non_inquina_la_testata():
+    # "(D.P.R. N. 472 del 14/8/96)" stampato sui DDT NON deve diventare
+    # numero bolla 472 / data 2096. La data vera arriva dopo.
+    text = (
+        "DOCUMENTO DI TRASPORTO (D.P.R. N. 472 del 14/8/96)\n"
+        "T.DOC N.DOC DATA\n"
+        "CI 1380 27/05/26\n"
+    )
+    t = extract_header(text, _cfg())
+    assert t.numero_bolla != "472"
+    assert t.data_bolla is not None
+    assert t.data_bolla.isoformat() == "2026-05-27"
+
+
+def test_data_anni_90_non_diventa_2096():
+    # Pivot anno: 96 non deve diventare 2096; in assenza di date plausibili
+    # il campo resta vuoto.
+    t = extract_header("Rif. legge del 14/8/96\n", _cfg())
+    assert t.data_bolla is None

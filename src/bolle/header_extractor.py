@@ -84,11 +84,16 @@ _RE_ORDINE_FORN = re.compile(
 # Numero della bolla/DDT: richiede che la cattura COMINCI con una cifra, cosi'
 # non agganciamo per sbaglio parole tipo "trasporto" dopo "Documento di...".
 # Il gap puo' scavalcare un newline perche' spesso "Documento di trasporto" e
-# il "Nr. ..." sono su righe diverse.
+# il "Nr. ..." sono su righe diverse. Minimo 4 caratteri: esclude il "472" di
+# "(D.P.R. N. 472 del 14/8/96)" stampato su molti DDT.
 _RE_BOLLA = re.compile(
-    r"(?:bolla|ddt|d\.d\.t\.?|documento)[\s\S]{0,40}?(\d[A-Z0-9/\-]{2,})", re.I
+    r"(?:bolla|ddt|d\.d\.t\.?|documento)[\s\S]{0,40}?(\d[A-Z0-9/\-]{3,})", re.I
 )
 _RE_DATA = re.compile(r"(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})")
+
+# Solo date di lavoro plausibili: esclude i riferimenti normativi stampati sui
+# DDT ("D.P.R. ... del 14/8/96" -> 1996/2096) e altri rumori OCR.
+_ANNO_MIN, _ANNO_MAX = 2015, 2049
 
 
 def _extract_via_regex(full_text: str) -> Testata:
@@ -102,14 +107,18 @@ def _extract_via_regex(full_text: str) -> Testata:
         t.numero_ordine_fornitore = m.group(1)
     if m := _RE_BOLLA.search(full_text):
         t.numero_bolla = m.group(1)
-    if m := _RE_DATA.search(full_text):
+    # Prima data con anno plausibile (non la prima in assoluto).
+    for m in _RE_DATA.finditer(full_text):
         d, mo, y = (int(x) for x in m.groups())
         if y < 100:
             y += 2000
+        if not (_ANNO_MIN <= y <= _ANNO_MAX):
+            continue
         try:
             t.data_bolla = date(y, mo, d)
+            break
         except ValueError:
-            pass
+            continue
     return t
 
 
