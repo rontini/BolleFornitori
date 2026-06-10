@@ -107,16 +107,18 @@ Moduli sotto `src/bolle/`:
    o quando non rileva piu' di un marker "Pagina 1/N" (caso comune in
    produzione). OCR leggero solo sul top 30% di ogni pagina per identificare
    i confini.
-2. **Parser formato Camozzi** (Vs. CODICE): mapping colonne nuovo, e quando
-   c'e' "Vs. CODICE" il `codice_interno` e' gia' risolto -> salta la
-   cross-reference.
-3. **Fix quantita "999377"**: il table-parser deve avere precedenza sul
-   freetext quando trova una tabella valida; oggi il freetext interviene
-   troppo spesso e sbaglia colonna.
-4. **`repetition_penalty`** su llama-server per ridurre i loop.
-5. **Contratto API Oracle**: endpoint, payload, autenticazione (oggi
+2. **[FATTO]** Parser formato Camozzi (Vs. CODICE pre-risolto -> salta
+   cross-reference), pattern inline e multi-riga.
+3. **[FATTO]** Parsing per pagina (\f fra le pagine) + estrazione di TUTTE le
+   tabelle: risolve il "999377" e la perdita delle patch quantita'.
+4. **[FATTO]** `repeat_penalty` 1.2 (OCR) / 1.3 (splitter) contro i loop.
+5. **Da validare sul campo**: rilanciare il PDF di prova completo e verificare
+   che lo splitter trovi ~6 bolle e che i JSON siano puliti.
+6. **Formato Zinc-Crom** (tabella `Articolo/Article Code` con codici `GPS
+   99xxxxxx`): non ancora gestito, righe perse. Da fare se rilevante.
+7. **Contratto API Oracle**: endpoint, payload, autenticazione (oggi
    `backend: memory`).
-6. **Abilitazione AVX sulla VM** (in parallelo, via richiesta a chi gestisce
+8. **Abilitazione AVX sulla VM** (in parallelo, via richiesta a chi gestisce
    VMware): sblocca PaddleOCR-VL/GLM-OCR e accelera l'inferenza.
 
 ## 7. Come ripartire da zero (anche da una chat nuova)
