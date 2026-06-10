@@ -86,7 +86,10 @@ class DotsOcrEngine(OcrEngine):
 
             text_parts.append(markdown)
             rows.extend(_markdown_to_rows(markdown))
-        return OcrResult(rows=rows, full_text="\n\n".join(text_parts))
+        # \f (form feed) separa le pagine: parse_articoli processa ogni pagina
+        # come segmento autonomo (tabelle e patch quantita' restano locali alla
+        # pagina, invece di mescolarsi su documenti multi-pagina).
+        return OcrResult(rows=rows, full_text="\n\f\n".join(text_parts))
 
     def _call_server(
         self, png_bytes: bytes, page_no: int, fase: str, prompt: str, max_tokens: int
@@ -227,51 +230,60 @@ class _Table:
     rows: list[list[str]]                    # celle delle sole righe dati
 
 
-def _find_header(lines: list[str]) -> tuple[int | None, int | None, int]:
-    """Restituisce (header_idx, n_cols, data_start). Tollerante al separatore mancante."""
-    # 1) Caso pulito: riga separatrice `| --- | --- |`.
-    for i, line in enumerate(lines):
-        s = line.strip()
-        if not (s.startswith("|") and s.endswith("|") and s.count("|") >= 2):
-            continue
-        cells = [c.strip() for c in s.strip("|").split("|")]
-        if all(_SEP_CELL.match(c) for c in cells if c):
-            return i - 1, len(cells), i + 1
-    # 2) Caso senza separatore: prendi la prima riga `|...|` che contiene almeno
-    #    una intestazione riconosciuta.
-    for i, line in enumerate(lines):
-        s = line.strip()
-        if not (s.startswith("|") and s.endswith("|") and s.count("|") >= 2):
-            continue
-        cells = [c.strip() for c in s.strip("|").split("|")]
-        if any(_normalize_header(c) for c in cells):
-            return i, len(cells), i + 1
-    return None, None, 0
-
-
 def _extract_articoli_table(markdown: str) -> _Table | None:
-    """Trova la PRIMA tabella articoli e ritorna intestazione + righe.
+    """Trova la PRIMA tabella articoli (compatibilita': vedi _extract_all_tables)."""
+    tables = _extract_all_tables(markdown)
+    return tables[0] if tables else None
 
-    Tollerante: l'header puo' essere segnato dalla riga separatrice
-    `| --- | --- |` oppure - se manca - viene desunto dalla prima riga `|...|`
-    che contiene almeno una intestazione conosciuta (Codice/Descrizione/...).
+
+def _extract_all_tables(markdown: str) -> list[_Table]:
+    """Estrae TUTTE le tabelle Markdown del testo, ognuna con il suo header.
+
+    Le pagine reali contengono spesso piu' tabelle (una fasulla con dati di
+    testata e una vera con gli articoli): fermarsi alla prima fa perdere le
+    righe buone. I blocchi sono sequenze di righe `|...|` consecutive; l'header
+    e' segnato dalla riga separatrice `| --- |` o, se manca, dalla prima riga
+    con almeno un'intestazione conosciuta.
     """
-    lines = markdown.splitlines()
-    header_idx, n_cols, data_start = _find_header(lines)
-    if header_idx is None or n_cols is None:
-        return None
+    tables: list[_Table] = []
+    block: list[str] = []
+    for line in markdown.splitlines() + [""]:
+        s = line.strip()
+        if s.startswith("|") and s.endswith("|") and s.count("|") >= 2:
+            block.append(s)
+            continue
+        if len(block) >= 2:
+            t = _table_from_block(block)
+            if t is not None:
+                tables.append(t)
+        block = []
+    return tables
 
-    header_cells = [c.strip() for c in lines[header_idx].strip().strip("|").split("|")]
-    columns = [_normalize_header(c) for c in header_cells]
+
+def _table_from_block(block: list[str]) -> _Table | None:
+    rows_cells = [[c.strip() for c in b.strip("|").split("|")] for b in block]
+
+    header_idx: int | None = None
+    data_start = 0
+    for i, cells in enumerate(rows_cells):
+        if cells and all(_SEP_CELL.match(c) for c in cells if c) and any(cells):
+            header_idx = i - 1
+            data_start = i + 1
+            break
+    if header_idx is None or header_idx < 0:
+        # Senza riga separatrice: la prima riga e' header solo se riconoscibile.
+        if any(_normalize_header(c) for c in rows_cells[0]):
+            header_idx, data_start = 0, 1
+        else:
+            return None
+
+    columns = [_normalize_header(c) for c in rows_cells[header_idx]]
+    n_cols = len(rows_cells[header_idx])
 
     rows: list[list[str]] = []
-    for line in lines[data_start:]:
-        s = line.strip()
-        if not (s.startswith("|") and s.endswith("|")):
-            break
-        cells = [c.strip() for c in s.strip("|").split("|")]
+    for cells in rows_cells[data_start:]:
         if len(cells) != n_cols:
-            break  # cambio di tabella (es. colli/peso): articoli finiti
+            break  # struttura cambiata: tabella finita
         if _is_non_articolo(cells, columns):
             break
         if all(not c for c in cells):
@@ -432,33 +444,53 @@ def _apply_qta_patches(rows: list["RigaBolla"], markdown: str) -> None:
 
 
 def parse_articoli(markdown: str) -> list["RigaBolla"]:
-    """Converte l'output Markdown in RigaBolla mappando le colonne per NOME.
+    """Converte l'output Markdown in RigaBolla, una PAGINA (segmento) alla volta.
+
+    Le pagine sono separate da \\f (inserito dall'engine): ogni segmento viene
+    parsato in autonomia - tabelle, fallback freetext e patch quantita' restano
+    locali alla pagina. Questo evita che, su bolle multi-pagina, la tabella
+    fasulla di una pagina mandi in freetext anche le pagine con tabelle buone,
+    o che le patch quantita' di una pagina vengano spalmate su righe di altre.
 
     Robusto rispetto a:
       - colonne in ordine diverso o sotto-insiemi (DDT senza prezzo/totale),
       - quantita scritte con unita' nella stessa cella ('18 NR' -> 18),
-      - tabelle di colli/peso/firme che seguono quella degli articoli (vengono ignorate),
-      - assenza della riga separatrice `| --- |` nella tabella Markdown,
-      - output del modello che ricade in testo libero (fallback regex su codice
-        articolo `\\d{6}\\.\\d{4}` o `\\d{8}`),
-      - "tabelle fasulle" prodotte dal modello inserendo dati di testata in righe
-        Markdown a pipe (vengono rifiutate dal filtro sul codice articolo).
+      - tabelle di colli/peso/firme dopo quella articoli (ignorate),
+      - PIU' tabelle nella stessa pagina (es. testata fasulla + articoli veri),
+      - assenza della riga separatrice `| --- |`,
+      - output in testo libero (fallback regex), incluso il formato Camozzi
+        con colonna 'Vs. CODICE' (codice interno gia' risolto).
     """
+    out: list["RigaBolla"] = []
+    for segment in markdown.split("\f"):
+        rows = _parse_segment(segment)
+        _apply_qta_patches(rows, segment)
+        out.extend(rows)
+    for i, r in enumerate(out, start=1):
+        r.numero_riga = i
+    return out
+
+
+def _parse_segment(segment: str) -> list["RigaBolla"]:
+    """Parsa una singola pagina: prima TUTTE le tabelle, poi fallback freetext."""
     from ..models import RigaBolla
 
-    table = _extract_articoli_table(markdown)
-    if table:
-        def cell(row: list[str], col: str) -> str:
+    out: list[RigaBolla] = []
+    visti: set[str] = set()
+    for table in _extract_all_tables(segment):
+        def cell(row: list[str], col: str, table: _Table = table) -> str:
             try:
                 return row[table.columns.index(col)]
             except ValueError:
                 return ""
 
-        out: list[RigaBolla] = []
-        for i, row in enumerate(table.rows, start=1):
+        for row in table.rows:
             codice = cell(row, "codice").strip()
             if not _is_codice_articolo(codice):
                 continue  # scarta righe di testata travestite da articoli
+            if codice in visti:
+                continue  # righe-metadati ripetono il codice della riga merce
+            visti.add(codice)
             out.append(
                 RigaBolla(
                     numero_riga=len(out) + 1,
@@ -469,14 +501,9 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
                     totale_riga=_decimale(cell(row, "totale")),
                 )
             )
-        if out:
-            _apply_qta_patches(out, markdown)
-            return out
-        # Tabella trovata ma senza righe articolo valide: prosegui col fallback.
-
-    out = _parse_articoli_freetext(markdown)
-    _apply_qta_patches(out, markdown)
-    return out
+    if out:
+        return out
+    return _parse_articoli_freetext(segment)
 
 
 # Fallback per quando il modello scivola in testo libero senza tabella a pipe.
@@ -492,9 +519,41 @@ _RE_FREETEXT_RIGA = re.compile(
 )
 _RE_FREETEXT_RIGA_NO_QTA = re.compile(
     r"^\s*(?P<codice>\d{8})(?!\d)\s+"
-    r"(?P<desc>[A-Z][^\n]*?)"
+    # (?!OP\b): un numero a 8 cifre seguito da 'OP' e' un ordine di produzione
+    # (formato SOFT '26421479 OP U97003102 ...'), non un articolo.
+    r"(?P<desc>(?!OP\b)[A-Z][^\n]*?)"
     r"(?=\s+" + _SENTINELS_FINE_DESC + r"|\s*$)",
     re.IGNORECASE,
+)
+
+# Formato Camozzi, riga singola: "<modello/descrizione> <Vs.CODICE 8 cifre>
+# [annotazione] <UM> <quantita>[segno di spunta]". Il Vs. CODICE e' il codice
+# interno del cliente GIA' RISOLTO: niente cross-reference per queste righe.
+# Es: "1463 5/3-SM-S01/K01 RACORDI RAPIDI 97270158 PZ 200" oppure
+#     "N08-F03/K01 FILTRO PER ACQUA 97290116 KANBAN CERT PZ 60".
+_RE_CAMOZZI_INLINE = re.compile(
+    r"^\s*(?P<desc>\S.{2,}?)\s+"
+    r"(?<![A-Za-z0-9.])(?P<vscod>\d{8})(?!\d)\s+"
+    r"(?:[A-Z][A-Z .]{2,18}\s+)?"
+    r"(?P<um>PZ|NR|KG|MT)\s+"
+    r"(?P<qta>\d+(?:[.,]\d+)?)",
+    re.IGNORECASE,
+)
+
+# Formato Camozzi multi-riga (celle in verticale):
+#   <codice modello>            es. 40-1028-130007
+#   <descrizione>               es. N08-F04/K01 FILTRO PER ARIA
+#   Orig: IT Comb.nom: ...      (ignorata)
+#   <Vs.CODICE>                 es. 97290115
+#   [annotazione]               es. KANBAN CERT (0-2 righe)
+#   <UM>                        es. PZ
+#   <quantita>                  es. 20
+_RE_CAMOZZI_BLOCK = re.compile(
+    r"^(?P<vscod>\d{8})\s*$\n"
+    r"(?:^[A-Z][A-Z .]{2,30}\s*$\n){0,2}"
+    r"^(?P<um>PZ|NR|KG|MT)\s*$\n"
+    r"^(?P<qta>\d+(?:[.,]\d+)?)",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -503,35 +562,50 @@ def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
 
     out: list[RigaBolla] = []
     visti: set[str] = set()
+
+    def aggiungi(codice: str, desc: str | None, qta: str | None, interno: str | None = None) -> None:
+        if codice in visti:
+            return
+        visti.add(codice)
+        out.append(
+            RigaBolla(
+                numero_riga=len(out) + 1,
+                codice_letto=codice,
+                descrizione=(desc or "").strip() or None,
+                quantita=_decimale(qta) if qta else None,
+                codice_interno=interno,
+            )
+        )
+
     for line in markdown.splitlines():
         s = line.strip().strip("|").strip()
         if m := _RE_FREETEXT_RIGA.search(s):
-            codice = m.group("codice")
-            if codice in visti:
-                continue
-            visti.add(codice)
-            out.append(
-                RigaBolla(
-                    numero_riga=len(out) + 1,
-                    codice_letto=codice,
-                    descrizione=m.group("desc").strip() or None,
-                    quantita=_decimale(m.group("qta")),
-                )
-            )
+            aggiungi(m.group("codice"), m.group("desc"), m.group("qta"))
+            continue
+        if m := _RE_CAMOZZI_INLINE.search(s):
+            # codice_interno = Vs. CODICE pre-risolto dalla bolla
+            aggiungi(m.group("vscod"), m.group("desc"), m.group("qta"), interno=m.group("vscod"))
             continue
         if m := _RE_FREETEXT_RIGA_NO_QTA.search(s):
-            codice = m.group("codice")
-            if codice in visti:
-                continue
-            visti.add(codice)
-            out.append(
-                RigaBolla(
-                    numero_riga=len(out) + 1,
-                    codice_letto=codice,
-                    descrizione=m.group("desc").strip() or None,
-                )
-            )
+            aggiungi(m.group("codice"), m.group("desc"), None)
+
+    # Formato Camozzi multi-riga: scandiamo i blocchi sull'intero segmento.
+    for m in _RE_CAMOZZI_BLOCK.finditer(markdown):
+        desc = _descrizione_prima_del_blocco(markdown, m.start())
+        aggiungi(m.group("vscod"), desc, m.group("qta"), interno=m.group("vscod"))
+
     return out
+
+
+def _descrizione_prima_del_blocco(markdown: str, pos: int) -> str | None:
+    """Risale dalle righe sopra un blocco Camozzi alla descrizione articolo,
+    saltando le righe 'Orig: ...' e le righe vuote."""
+    for prev in reversed(markdown[:pos].rstrip().splitlines()[-3:]):
+        p = prev.strip()
+        if not p or p.lower().startswith("orig:"):
+            continue
+        return p
+    return None
 
 
 def _markdown_to_rows(markdown: str) -> list[TableRow]:

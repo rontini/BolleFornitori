@@ -39,6 +39,22 @@ def test_confidenza_bassa_annotata():
     assert any("confidenza" in n for n in righe[0].note)
 
 
+def test_codice_interno_pre_risolto_salta_cross_reference():
+    # Riga con 'Vs. CODICE' dalla bolla (formato Camozzi): gia' risolta,
+    # niente cross-reference ne' anagrafica.
+    api = InMemoryAziendaApi()  # vuota: cross-ref e anagrafica non risolvono nulla
+    bolla = Bolla(
+        documento_id="D",
+        kind=DocumentKind.PDF_TEXT,
+        testata=Testata(fornitore="CAMOZZI"),
+        righe=[RigaBolla(1, "97270158", quantita=Decimal(200), codice_interno="97270158")],
+    )
+    in_rev = valida_bolla(bolla, _Resolver(api))
+    assert in_rev == []
+    assert bolla.righe[0].risolto is True
+    assert any("pre-risolto" in n for n in bolla.righe[0].note)
+
+
 def test_aritmetica_fallita_manda_in_revisione():
     api = InMemoryAziendaApi(anagrafica={"ART-100"})
     bolla = Bolla(

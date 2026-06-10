@@ -272,6 +272,111 @@ QTA:99928399=3
     assert [str(r.quantita) for r in righe] == ["18", "3"]
 
 
+def test_parsing_per_pagina_con_formfeed():
+    # Pagina 1: tabella fasulla + articoli in prosa + 2a passata quantita'.
+    # Pagina 2: tabella vera con righe-metadati che ripetono il codice.
+    # Il \f separa le pagine: tabelle e patch restano locali a ciascuna.
+    pag1 = """| Nr. | Descrizione | Quantita | U.d.M. |
+| :--- | :--- | :--- | :--- |
+| 26DGT-01995 | CeFLA S.C. | 180 ogp F.M. | COOP |
+| 00497971200 | P.IVA | PORTO | |
+
+99951827 COPERTURA LATERALE (VERN)
+99928399 CARTER LATO ASPIRAZIONE SKEM (NERO)
+
+Nr. Descrizione Quantita U.d.M.
+088578.0163 18 NR
+088608.0401 3 NR
+"""
+    pag2 = """| Nr. | Descrizione | Quantita | U.d.M. |
+| :--- | :--- | :--- | :--- |
+| 088631.0127 | 99937761 MANIGLIA MYRAY SX VERNN | 32 | NR |
+| 088631.0127 | Nr. commessa clienta: 405MAG | | |
+| 088631.0127 | Rf. Vs DDT 19 del 13/01/26 - ACCONTO | | |
+| 088676.0077 | 99922011 PRIMO BRACCIO TAV.ASS | 5 | NR |
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(pag1 + "\n\f\n" + pag2)
+    per_codice = {r.codice_letto: r for r in righe}
+
+    # Pagina 1: articoli in prosa con quantita' patchate per posizione.
+    assert str(per_codice["99951827"].quantita) == "18"
+    assert str(per_codice["99928399"].quantita) == "3"
+    # Pagina 2: tabella vera letta con colonne giuste, metadati dedupati.
+    assert str(per_codice["088631.0127"].quantita) == "32"
+    assert per_codice["088631.0127"].descrizione == "99937761 MANIGLIA MYRAY SX VERNN"
+    assert str(per_codice["088676.0077"].quantita) == "5"
+    # Numerazione progressiva globale.
+    assert [r.numero_riga for r in righe] == [1, 2, 3, 4]
+
+
+def test_camozzi_inline_vs_codice_pre_risolto():
+    md = """CODICE NODELLO
+CODICE COMMERCIALE - DESCRISIONE
+Va. CODICE
+DN
+QUANTITA'
+
+Saldo Vs.ord. 26423188-OK del 26.05.2026
+1463 5/3-SM-S01/K01 RACORDI RAPIDI 97270158 PZ 200
+Orig: IT Comb.nom.: 74122000
+M008-RS20/K01 REGOLATORE PER ARIA 97290058 PZ 56
+Orig: IT Comb.nom.: 84811005
+N008-F03/K01 FILTRO PER ACQUA 97290116 KANBAN CERT PZ 60
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    per_codice = {r.codice_letto: r for r in righe}
+
+    assert set(per_codice) == {"97270158", "97290058", "97290116"}
+    # Vs. CODICE = codice interno gia' risolto
+    assert per_codice["97270158"].codice_interno == "97270158"
+    assert str(per_codice["97270158"].quantita) == "200"
+    assert "RACORDI RAPIDI" in per_codice["97270158"].descrizione
+    # Annotazione 'KANBAN CERT' fra codice e UM non disturba
+    assert str(per_codice["97290116"].quantita) == "60"
+
+
+def test_camozzi_multiriga_vs_codice():
+    md = """40-1028-130007
+N08-F04/K01 FILTRO PER ARIA
+Orig: IT Comb.nom: 84211925
+97290115
+PZ
+20
+
+40-1028-130006
+N08-F03/K01 FILTRO PER ACQUA
+Orig: IT Comb.nom: 84211925
+97290116
+KANBAN CERT
+PZ
+60
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    per_codice = {r.codice_letto: r for r in righe}
+
+    assert set(per_codice) == {"97290115", "97290116"}
+    assert per_codice["97290115"].codice_interno == "97290115"
+    assert str(per_codice["97290115"].quantita) == "20"
+    assert per_codice["97290115"].descrizione == "N08-F04/K01 FILTRO PER ARIA"
+    assert str(per_codice["97290116"].quantita) == "60"
+
+
+def test_ordini_di_produzione_soft_non_diventano_articoli():
+    # Formato SOFT: '26421479 OP U97003102 ...' e' un ordine di produzione.
+    md = """26421479 OP U97003102 SED SEG ST 102 BLD ATLANTICO INU 9,000
+26422750 OP U97003132
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    assert parse_articoli(md) == []
+
+
 def test_streaming_sse_estrae_il_contenuto():
     # Riga "data: {...}" tipica dello stream OpenAI-compatibile di llama-server.
     line = b'data: {"choices":[{"delta":{"content":"ART"}}]}'

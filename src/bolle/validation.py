@@ -43,6 +43,14 @@ def valida_bolla(bolla: Bolla, resolver: CodiceResolver) -> list[RigaBolla]:
 
 
 def _risolvi_codice(riga: RigaBolla, fornitore: str | None, resolver: CodiceResolver) -> None:
+    # Alcuni fornitori stampano in bolla il NOSTRO codice (colonna 'Vs. CODICE'):
+    # in quel caso il parser lo ha gia' messo in codice_interno e la riga e'
+    # risolta senza passare dalla cross-reference.
+    if riga.codice_interno:
+        riga.risolto = True
+        riga.note.append("codice interno pre-risolto dalla bolla (Vs. CODICE)")
+        return
+
     interno = resolver.da_cross_reference(fornitore, riga.codice_letto)
     if interno is not None:
         riga.codice_interno = interno
