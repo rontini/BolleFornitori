@@ -1,4 +1,9 @@
-from bolle.splitter import _boundaries_from_markers, _parse_marker
+from bolle.splitter import (
+    _boundaries_from_markers,
+    _fingerprint,
+    _parse_marker,
+    _starts_from_scan,
+)
 
 
 # --- parsing del marker di pagina --------------------------------------------
@@ -65,3 +70,68 @@ def test_boundaries_inserisce_inizio_se_manca():
 def test_boundaries_dedup_e_filtra_out_of_range():
     # Indici duplicati o fuori range vengono filtrati.
     assert _boundaries_from_markers([0, 0, 5, 99], 10) == [(0, 4), (5, 9)]
+
+
+# --- impronta fornitore -------------------------------------------------------
+
+def test_fingerprint_robusta_al_rumore_ocr():
+    # Stessa carta intestata trascritta in modi diversi -> stessa impronta.
+    a = _fingerprint("Verniciatura Bolognese s.r.l.\nPartita IVA: IT00565371200")
+    b = _fingerprint("Verniciatura\nBolognese srl\n\nVerniciatura Bolognese s.r.l.")
+    assert a == b == "verniciaturabolognesesrl"
+
+
+def test_fingerprint_fornitori_diversi():
+    soft = _fingerprint("SOFT Italia S.p.A.\nSelle, cuscini bauletti ed accessori")
+    zinc = _fingerprint("ZINC-CROM srl\n\nVia Bicocca, 13/C - 40026 Imola (Bo)")
+    assert soft != zinc
+    assert soft.startswith("softitaliaspa")
+    assert zinc.startswith("zinccromsrl")
+
+
+# --- inizio bolla da marker + impronta ----------------------------------------
+
+def test_starts_dal_pdf_di_prova_reale():
+    # Replica del log reale: 17 pagine, marker leggibile solo su Camozzi (11-15),
+    # impronte fornitore per il resto.
+    vern = "verniciaturabolognesesrl"
+    soft = "softitaliaspaselleecusci"
+    camozzi = "copiaadusointernodocumen"
+    camozzi_seg = "documentoditrasportodpr1"
+    zinc = "zinccromsrlviabicocca13c"
+    infos = [
+        (None, vern),        # pag 1   bolla Verniciatura 01995
+        (None, vern),        # pag 2
+        (None, vern),        # pag 3
+        (None, vern),        # pag 4
+        (None, vern),        # pag 5
+        (None, soft),        # pag 6   SOFT (impronta cambia -> nuova bolla)
+        (None, soft),        # pag 7
+        (None, vern),        # pag 8   Verniciatura 01997 (impronta cambia)
+        (None, vern),        # pag 9
+        (None, vern),        # pag 10  Verniciatura 01961 (NON rilevabile: merge accettato)
+        (1, camozzi),        # pag 11  Camozzi (marker 1/5)
+        (2, camozzi_seg),    # pag 12  marker 2/5: mai inizio anche se impronta cambia
+        (3, camozzi_seg),    # pag 13
+        (4, camozzi_seg),    # pag 14
+        (5, camozzi_seg),    # pag 15
+        (None, zinc),        # pag 16  Zinc-Crom (impronta cambia)
+        (None, zinc),        # pag 17
+    ]
+    starts = _starts_from_scan(infos)
+    assert starts == [5, 7, 10, 15]
+    # Con l'inserimento automatico della pagina 0: 5 bolle.
+    assert _boundaries_from_markers(starts, 17) == [
+        (0, 4),    # Verniciatura 01995 (pagg 1-5)
+        (5, 6),    # SOFT (pagg 6-7)
+        (7, 9),    # Verniciatura 01997+01961 (pagg 8-10, merge accettato)
+        (10, 14),  # Camozzi (pagg 11-15)
+        (15, 16),  # Zinc-Crom (pagg 16-17)
+    ]
+
+
+def test_starts_bolla_singola_multipagina_stessa_impronta():
+    # Caso produzione: DDT di 3 pagine dello stesso fornitore, marker illeggibile
+    # -> nessuno split.
+    fp = "fornitorequalunquesrlsed"
+    assert _starts_from_scan([(None, fp), (None, fp), (None, fp)]) == []

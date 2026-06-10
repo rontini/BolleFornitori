@@ -534,7 +534,9 @@ _RE_FREETEXT_RIGA_NO_QTA = re.compile(
 _RE_CAMOZZI_INLINE = re.compile(
     r"^\s*(?P<desc>\S.{2,}?)\s+"
     r"(?<![A-Za-z0-9.])(?P<vscod>\d{8})(?!\d)\s+"
-    r"(?:[A-Z][A-Z .]{2,18}\s+)?"
+    # Annotazione opzionale fra codice e UM: 'KANBAN CERT', 'CON CERTIFI',
+    # 'CERT.KTW/W2', ... (ammette cifre, punti, slash e trattini).
+    r"(?:[A-Z][A-Z0-9 ./\-]{1,24}\s+)?"
     r"(?P<um>PZ|NR|KG|MT)\s+"
     r"(?P<qta>\d+(?:[.,]\d+)?)",
     re.IGNORECASE,
@@ -567,11 +569,13 @@ def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
         if codice in visti:
             return
         visti.add(codice)
+        # Ripulisce i residui di righe pipe finite nel freetext ('| DESC |').
+        desc_pulita = (desc or "").strip().strip("|").strip()
         out.append(
             RigaBolla(
                 numero_riga=len(out) + 1,
                 codice_letto=codice,
-                descrizione=(desc or "").strip() or None,
+                descrizione=desc_pulita or None,
                 quantita=_decimale(qta) if qta else None,
                 codice_interno=interno,
             )

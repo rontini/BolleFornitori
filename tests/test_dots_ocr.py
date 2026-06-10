@@ -367,6 +367,30 @@ PZ
     assert str(per_codice["97290116"].quantita) == "60"
 
 
+def test_camozzi_annotazione_con_slash_e_cifre():
+    # Annotazioni tipo 'CERT.KTW/W2' fra Vs.CODICE e UM non devono rompere il match.
+    md = "M008-RS20/K01 REGOLATORE ACQUA 97977500 CERT.KTW/W2 PZ 4\n"
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    assert len(righe) == 1
+    assert righe[0].codice_letto == "97977500"
+    assert righe[0].codice_interno == "97977500"
+    assert str(righe[0].quantita) == "4"
+
+
+def test_descrizione_ripulita_da_pipe_residue():
+    # Righe pipe senza header riconoscibile finiscono nel freetext: le pipe
+    # residue non devono sporcare la descrizione.
+    md = "| 088631.0127 | MANIGLIA MYRAY SX VERNN | 32 | NR |\n"
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    assert len(righe) == 1
+    assert righe[0].descrizione == "MANIGLIA MYRAY SX VERNN"
+    assert str(righe[0].quantita) == "32"
+
+
 def test_ordini_di_produzione_soft_non_diventano_articoli():
     # Formato SOFT: '26421479 OP U97003102 ...' e' un ordine di produzione.
     md = """26421479 OP U97003102 SED SEG ST 102 BLD ATLANTICO INU 9,000

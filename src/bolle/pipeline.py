@@ -69,6 +69,7 @@ class Pipeline:
 
         self.api.invia_bolla(bolla)
         esito = riconcilia(bolla, self.api)
+        self._dump_esito(bolla)
 
         if esito.righe_in_revisione or any(
             p.tipo.value == "revisione" for p in esito.proposte
@@ -85,6 +86,30 @@ class Pipeline:
             if righe:
                 return righe
         return parse_lines(ocr, self.cfg.ocr.confidence_threshold)
+
+    def _dump_esito(self, bolla: Bolla) -> None:
+        """Salva l'esito COMPLETO (testata + tutte le righe, risolte e non) in
+        work/output/<id>.json. In coda di revisione finiscono solo le righe non
+        risolte: senza questo dump le righe risolte non sarebbero ispezionabili
+        quando si gira in dry-run / senza API."""
+        import json
+        from dataclasses import asdict
+
+        from .review_queue import _json_default
+
+        out_dir = self.cfg.paths.work / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "documento_id": bolla.documento_id,
+            "testata": asdict(bolla.testata),
+            "righe": [asdict(r) for r in bolla.righe],
+        }
+        path = out_dir / f"{bolla.documento_id}.json"
+        path.write_text(
+            json.dumps(payload, default=_json_default, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        log.info("esito completo salvato in %s", path)
 
     def _dump_ocr(self, stem: str, full_text: str) -> None:
         """Salva l'output grezzo dell'OCR (Markdown) per ispezione/taratura parser."""

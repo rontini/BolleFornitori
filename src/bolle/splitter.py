@@ -64,8 +64,8 @@ def split_pdf(
             return [pdf_path]
 
         log.info("splitter: ispeziono %d pagine per rilevare i confini fra bolle", n_pages)
-        page_starts = _scan_page_starts(doc, cfg)
-        boundaries = _boundaries_from_markers(page_starts, n_pages)
+        infos = _scan_pages(doc, cfg)
+        boundaries = _boundaries_from_markers(_starts_from_scan(infos), n_pages)
 
         if len(boundaries) <= 1:
             log.info("splitter: bolla unica, nessuno split necessario")
@@ -89,18 +89,54 @@ def split_pdf(
     return out_paths
 
 
-def _scan_page_starts(doc, cfg: OcrConfig) -> list[int]:
-    """Per ogni pagina chiede al modello il marker di intestazione.
+def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, str]]:
+    """Per ogni pagina: (numero nel marker 'Pagina N/M' se letto, impronta fornitore).
 
-    Restituisce gli indici 0-based delle pagine che hanno page_num == 1.
+    L'impronta e' derivata dalle prime righe della trascrizione dell'header
+    (carta intestata): serve a rilevare il cambio di fornitore quando il
+    marker di pagina non e' leggibile.
     """
-    starts: list[int] = []
+    out: list[tuple[int | None, str]] = []
     for i in range(len(doc)):
         text = _ocr_top_of_page(doc[i], cfg)
         page_num, total = _parse_marker(text)
-        log.info("splitter: pagina %d -> marker '%s' (n=%s/%s)", i + 1, text.strip(), page_num, total)
-        if page_num == 1:
+        fp = _fingerprint(text)
+        log.info(
+            "splitter: pagina %d -> n=%s/%s, impronta '%s'", i + 1, page_num, total, fp
+        )
+        out.append((page_num, fp))
+    return out
+
+
+def _fingerprint(text: str) -> str:
+    """Prime due righe non vuote, solo alfanumerico minuscolo, max 24 caratteri.
+
+    Robusto al rumore OCR: 'Verniciatura Bolognese s.r.l.' e
+    'Verniciatura\\nBolognese srl' producono la stessa impronta.
+    """
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    joined = "".join(lines[:2])
+    alnum = re.sub(r"[^a-z0-9]", "", joined.lower())
+    return alnum[:24]
+
+
+def _starts_from_scan(infos: list[tuple[int | None, str]]) -> list[int]:
+    """Indici 0-based delle pagine che iniziano una nuova bolla.
+
+    Regole:
+      - marker 'Pagina 1/N' -> inizio bolla;
+      - marker 'Pagina K/N' con K>1 -> continuazione (mai inizio);
+      - marker illeggibile -> inizio se l'impronta fornitore cambia rispetto
+        alla pagina precedente (carta intestata diversa = bolla diversa).
+    """
+    starts: list[int] = []
+    prev_fp: str | None = None
+    for i, (num, fp) in enumerate(infos):
+        if num == 1:
             starts.append(i)
+        elif num is None and prev_fp is not None and fp and fp != prev_fp:
+            starts.append(i)
+        prev_fp = fp
     return starts
 
 
