@@ -44,6 +44,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="pagine da elaborare, 1-based (es. '1', '1-3', '1,5,7'). Default: tutte",
     )
+    parser.add_argument(
+        "--no-split",
+        action="store_true",
+        help="non eseguire lo splitter multi-bolla: il file viene processato "
+             "come una singola bolla. Utile quando passi PDF gia' divisi.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -60,11 +66,12 @@ def main(argv: list[str] | None = None) -> int:
 
     exit_code = 0
     for doc in args.documenti:
-        # Splitter: con --pages saltiamo (l'utente sta lavorando su pagine
-        # specifiche); altrimenti proviamo a splittare PDF multi-bolla. E' un
-        # no-op se il PDF ha 1 pagina o se troviamo un solo marker "Pagina 1/N".
+        # Splitter: saltiamo se l'utente ha passato --no-split (PDF gia' divisi)
+        # o --pages (sta lavorando su pagine specifiche). Altrimenti proviamo a
+        # splittare i PDF multi-bolla. E' un no-op se il PDF ha 1 pagina o se
+        # troviamo un solo marker "Pagina 1/N".
         sub_documenti = [Path(doc)]
-        if pages is None and cfg.ocr.splitter_enabled:
+        if pages is None and not args.no_split and cfg.ocr.splitter_enabled:
             try:
                 sub_documenti = split_pdf(Path(doc), cfg.ocr, work_dir=cfg.paths.work / "split")
             except Exception as exc:  # noqa: BLE001
