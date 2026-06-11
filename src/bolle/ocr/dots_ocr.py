@@ -543,7 +543,21 @@ _RE_CAMOZZI_INLINE = re.compile(
     re.IGNORECASE,
 )
 
-# Formato Camozzi multi-riga (celle in verticale):
+# Variante "appiattita" delle righe Verniciatura: il modello fonde la riga
+# tabella in testo unico con il codice A META' RIGA e la quantita' in fondo:
+#   "Descrizione 99934970 supporto craniostato bianco ral 9003 Rif. Vs DDT ... 1 NR"
+# La descrizione si ferma ai metadati (Nr./Rif./Ordine/Vs.) e la quantita' e'
+# l'ultimo numero prima dell'unita' di misura a fine riga.
+_RE_FREETEXT_MIDLINE = re.compile(
+    r"(?<![0-9A-Za-z.])(?P<codice>\d{6}[A-Z]{0,4}\.\d{4}|\d{8})(?!\d)\s+"
+    r"(?P<desc>[A-Za-z][^\n]*?)"
+    r"(?:\s+(?:Nr\.|R[if]+\.|Rf|Ordine\s|Vs[.,])[^\n]*?)?"
+    r"\s+(?P<qta>\d+(?:[.,]\d+)?)\s*(?:NR|PZ|KG|MT)\s*$",
+    re.IGNORECASE,
+)
+# Se il testo subito prima del codice finisce con uno di questi, il numero e'
+# un riferimento (ordine/DDT), non un articolo.
+_RE_PREFISSO_RIFERIMENTO = re.compile(r"(?:ordine|nr\.|ddt|n\.)\s*$", re.IGNORECASE)
 #   <codice modello>            es. 40-1028-130007
 #   <descrizione>               es. N08-F04/K01 FILTRO PER ARIA
 #   Orig: IT Comb.nom: ...      (ignorata)
@@ -592,6 +606,11 @@ def _parse_articoli_freetext(markdown: str) -> list["RigaBolla"]:
             # Le righe con 'Comb.nom' contengono il codice doganale (nomenclatura
             # combinata, es. 74122000): NON e' un Vs. CODICE.
             aggiungi(m.group("vscod"), m.group("desc"), m.group("qta"), interno=m.group("vscod"))
+            continue
+        if (m := _RE_FREETEXT_MIDLINE.search(s)) and not _RE_PREFISSO_RIFERIMENTO.search(
+            s[: m.start("codice")]
+        ):
+            aggiungi(m.group("codice"), m.group("desc"), m.group("qta"))
             continue
         if m := _RE_FREETEXT_RIGA_NO_QTA.search(s):
             aggiungi(m.group("codice"), m.group("desc"), None)

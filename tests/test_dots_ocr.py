@@ -412,6 +412,24 @@ def test_codice_doganale_comb_nom_non_e_vs_codice():
     assert all(r.codice_letto != "74122000" for r in righe)
 
 
+def test_codice_a_meta_riga_con_quantita_in_fondo():
+    # Output reale (DDT 01961): il modello appiattisce la riga tabella in testo
+    # unico. Il codice sta dopo "Descrizione", la quantita' in fondo. Le righe
+    # con "Ordine Nr. <numero>" NON devono produrre falsi articoli.
+    md = """Descrizione Ordine 28OUV01423 del 25/05/2026 Vs. Ordine Nr. 26439577 SU Del 9003 Rif. Vs DDT 26450760 del 13/03/26 - ACCONTO 1 NR
+Descrizione 99934970 supporto craniostato bianco ral 9003 Rif. Vs DDT 26450760 del 13/03/26 - ACCONTO 1 NR
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    codici = [r.codice_letto for r in righe]
+    assert "26439577" not in codici          # numero d'ordine, non articolo
+    assert "26450760" not in codici          # numero DDT, non articolo
+    assert codici == ["99934970"]
+    assert str(righe[0].quantita) == "1"
+    assert righe[0].descrizione.startswith("supporto craniostato bianco")
+
+
 def test_ordini_di_produzione_soft_non_diventano_articoli():
     # Formato SOFT: '26421479 OP U97003102 ...' e' un ordine di produzione.
     md = """26421479 OP U97003102 SED SEG ST 102 BLD ATLANTICO INU 9,000
