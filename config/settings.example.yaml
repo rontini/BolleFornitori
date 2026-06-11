@@ -2,7 +2,9 @@
 # Copiare in config/settings.yaml e adattare. settings.yaml NON va versionato.
 
 ocr:
-  engine: paddleocr_vl        # paddleocr_vl | glm_ocr | dots_ocr
+  # paddleocr_vl: motore primario, richiede CPU con AVX (macchina nuova).
+  # dots_ocr:     alternativa via llama.cpp per CPU/VM senza AVX.
+  engine: paddleocr_vl
   resize_px: 1024             # sweet spot per inferenza su CPU
   table_mode: true
   confidence_threshold: 0.80  # righe sotto soglia -> coda di revisione

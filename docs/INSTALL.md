@@ -1,3 +1,39 @@
+# Macchina con AVX — PaddleOCR-VL (motore primario, branch claude/paddleocr-avx)
+
+Sulla macchina con AVX abilitato si usa PaddleOCR-VL in-process: **niente
+llama-server**, niente download GGUF. Stessa pipeline, stesso parser.
+
+```cmd
+:: 1. ambiente (come al solito)
+py -m venv .venv
+.venv\Scripts\activate.bat
+pip install -e ".[pdf,dev]"
+pytest                                  :: tutti verdi
+
+:: 2. runtime PaddleOCR-VL (pesante, una tantum; il modello si scarica al 1o uso)
+pip install paddlepaddle paddleocr
+
+:: 3. verifica che la CPU sia vista con AVX
+python -c "import paddle; print('paddle', paddle.__version__)"
+
+:: 4. config: copia l'esempio (engine e' gia' paddleocr_vl) e attiva l'offline
+copy config\settings.example.yaml config\settings.yaml
+:: in settings.yaml: api.backend: memory  (finche' non ci sono le API Oracle)
+
+:: 5. lancio (identico a prima)
+python -m bolle.cli --config config\settings.yaml --pages 1 "C:\percorso\bolla.pdf"
+```
+
+Lo splitter multi-bolla funziona anche qui (legge gli header con PaddleOCR-VL
+in-process). L'output resta in `work\ocr_raw` / `work\output` / `work\revisione`.
+
+> Nota: l'output Markdown di PaddleOCR-VL puo' differire leggermente da quello
+> di GLM-OCR/llama. La mappatura e' isolata in `_markdown_da_risultato()` in
+> `src/bolle/ocr/paddleocr_vl.py`: se il primo run su una bolla reale mostra
+> uno schema diverso, si adatta SOLO quella funzione.
+
+---
+
 # Step 1 — Validazione OCR sulle bolle reali
 
 Obiettivo (analisi, sez. 6.1 e 13): confrontare **PaddleOCR-VL** e **GLM-OCR** su

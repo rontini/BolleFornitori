@@ -96,9 +96,17 @@ def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, str]]:
     (carta intestata): serve a rilevare il cambio di fornitore quando il
     marker di pagina non e' leggibile.
     """
+    # Con il motore PaddleOCR-VL l'header viene letto in-process (niente
+    # llama-server): istanziamo l'engine UNA volta per tutte le pagine.
+    paddle_engine = None
+    if cfg.engine == "paddleocr_vl":
+        from .ocr.paddleocr_vl import PaddleOcrVlEngine
+
+        paddle_engine = PaddleOcrVlEngine(cfg)
+
     out: list[tuple[int | None, str]] = []
     for i in range(len(doc)):
-        text = _ocr_top_of_page(doc[i], cfg)
+        text = _ocr_top_of_page(doc[i], cfg, paddle_engine)
         page_num, total = _parse_marker(text)
         fp = _fingerprint(text)
         log.info(
@@ -140,10 +148,9 @@ def _starts_from_scan(infos: list[tuple[int | None, str]]) -> list[int]:
     return starts
 
 
-def _ocr_top_of_page(page, cfg: OcrConfig) -> str:
-    """Rendi la parte alta della pagina e chiedi al modello solo il marker."""
+def _ocr_top_of_page(page, cfg: OcrConfig, paddle_engine=None) -> str:
+    """Rendi la parte alta della pagina e leggine il testo con il motore attivo."""
     import fitz
-    import requests  # type: ignore
 
     rect = page.rect
     # Top 30% della pagina: copre l'intestazione di tutte le bolle viste.
@@ -152,6 +159,15 @@ def _ocr_top_of_page(page, cfg: OcrConfig) -> str:
     zoom = cfg.resize_px / longest
     pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=crop)
     png_bytes = pix.tobytes("png")
+
+    if paddle_engine is not None:
+        # OCR completo del crop: marker e impronta si estraggono dal testo.
+        return paddle_engine.recognize_png(png_bytes)
+    return _header_via_llama(png_bytes, cfg)
+
+
+def _header_via_llama(png_bytes: bytes, cfg: OcrConfig) -> str:
+    import requests  # type: ignore
 
     payload = {
         "model": cfg.dots_model,

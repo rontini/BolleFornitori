@@ -1,12 +1,17 @@
-"""Adapter PaddleOCR-VL (motore OCR primario).
+"""Adapter PaddleOCR-VL (motore OCR primario su macchine con AVX).
 
-Modello vision-language ~0.9B, Apache 2.0, modalita tabella dedicata, multilingua
-(copre le bolle estere), CPU-friendly. Generalizza sui layout: nessun template
-per fornitore.
+Modello vision-language ~0.9B, Apache 2.0, modalita' tabella dedicata,
+multilingua, scelto come primario dall'analisi. Richiede PaddlePaddle, i cui
+wheel Windows/Linux sono compilati con AVX: su macchine/VM senza AVX usare il
+motore `dots_ocr` (llama.cpp).
 
-NB: l'import di paddleocr e lazy. Lo skeleton e eseguibile e testabile anche senza
-il modello installato; in quel caso recognize() solleva un errore esplicito che
-indica cosa installare.
+Strategia identica al motore dots: ogni pagina viene rasterizzata e convertita
+in MARKDOWN; le pagine sono separate da \f cosi' parse_articoli() le processa
+come segmenti autonomi. Tutto il parsing robusto (tabelle per nome colonna,
+freetext, formato Camozzi/Vs.CODICE, dedup) e' riusato senza modifiche.
+
+NB: l'import di paddleocr e' lazy: lo skeleton resta importabile e testabile
+anche senza il runtime installato.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..config import OcrConfig
-from .base import OcrEngine, OcrResult, TableCell, TableRow
+from .base import OcrEngine, OcrResult
 
 
 class PaddleOcrVlEngine(OcrEngine):
@@ -31,45 +36,60 @@ class PaddleOcrVlEngine(OcrEngine):
             raise RuntimeError(
                 "PaddleOCR-VL non disponibile. Installa con:\n"
                 "  pip install paddlepaddle paddleocr\n"
-                "e scarica il modello (vedi README)."
+                "(richiede CPU con AVX; in alternativa usa ocr.engine=dots_ocr)."
             ) from exc
         self._pipeline = PaddleOCRVL()
 
     def recognize(self, path: str | Path, pages: list[int] | None = None) -> OcrResult:
+        from .dots_ocr import _render_pages  # riusa rasterizzazione PDF/immagini
+
         self._ensure_loaded()
-        image = _load_and_resize(path, self.cfg.resize_px)
-        raw = self._pipeline.predict(image)  # type: ignore[union-attr]
-        return _to_ocr_result(raw)
+        rendered = _render_pages(Path(path), self.cfg.resize_px, pages)
+        parts: list[str] = []
+        for page_no, png in rendered:
+            parts.append(self.recognize_png(png))
+        # \f separa le pagine: parse_articoli le processa come segmenti autonomi.
+        return OcrResult(rows=[], full_text="\n\f\n".join(parts))
+
+    def recognize_png(self, png_bytes: bytes) -> str:
+        """OCR di una singola immagine PNG -> Markdown. Usato anche dallo splitter."""
+        from io import BytesIO
+
+        import numpy as np  # type: ignore
+        from PIL import Image  # type: ignore
+
+        self._ensure_loaded()
+        img = np.array(Image.open(BytesIO(png_bytes)).convert("RGB"))
+        results = self._pipeline.predict(img)  # type: ignore[union-attr]
+        return "\n".join(_markdown_da_risultato(r) for r in results or [])
 
 
-def _load_and_resize(path: str | Path, target_px: int):
-    """Carica l'immagine e la ridimensiona a ~target_px sul lato lungo."""
-    from PIL import Image  # type: ignore
+def _markdown_da_risultato(res) -> str:
+    """Normalizza un risultato PaddleOCR-VL in testo Markdown.
 
-    img = Image.open(path).convert("RGB")
-    w, h = img.size
-    longest = max(w, h)
-    if longest > target_px:
-        scale = target_px / longest
-        img = img.resize((int(w * scale), int(h * scale)))
-    return img
-
-
-def _to_ocr_result(raw) -> OcrResult:
-    """Normalizza l'output PaddleOCR-VL nello schema interno (TableRow/TableCell).
-
-    Lo schema esatto va adattato alla versione del runtime in fase di validazione
-    sui documenti reali; qui isoliamo la mappatura in un solo punto.
+    Lo schema dell'oggetto risultato varia fra versioni del runtime (attributo
+    `markdown` come stringa, dict, o metodo): qui isoliamo la mappatura in un
+    solo punto, con fallback progressivi.
     """
-    rows: list[TableRow] = []
-    text_parts: list[str] = []
-    for block in raw or []:
-        for line in block.get("table", {}).get("rows", []):
-            cells = [
-                TableCell(text=str(c.get("text", "")), confidence=float(c.get("score", 1.0)))
-                for c in line
-            ]
-            rows.append(TableRow(cells=cells))
-        if t := block.get("text"):
-            text_parts.append(str(t))
-    return OcrResult(rows=rows, full_text="\n".join(text_parts))
+    md = getattr(res, "markdown", None)
+    if callable(md):  # alcune versioni lo espongono come metodo
+        try:
+            md = md()
+        except TypeError:
+            md = None
+    if isinstance(md, str) and md.strip():
+        return md
+    if isinstance(md, dict):
+        for key in ("markdown_texts", "markdown", "text"):
+            v = md.get(key)
+            if isinstance(v, str) and v.strip():
+                return v
+        stringhe = [v for v in md.values() if isinstance(v, str) and v.strip()]
+        if stringhe:
+            return "\n".join(stringhe)
+    j = getattr(res, "json", None)
+    if isinstance(j, dict):
+        import json as _json
+
+        return _json.dumps(j, ensure_ascii=False)
+    return str(res)

@@ -4,7 +4,15 @@
 > milestone, cosi' chiunque riparta (anche in una nuova chat) ha il contesto
 > completo senza dover ricostruire la storia.
 
-Ultimo aggiornamento: validazione OCR su scansioni reali (CPU senza AVX).
+Ultimo aggiornamento: branch `claude/paddleocr-avx` per la macchina con AVX.
+
+## 0. Branch
+- `claude/tender-meitner-DV4PC`: pipeline per la VM SENZA AVX (motore
+  dots_ocr via llama.cpp + GLM-OCR-GGUF). Congelato come fallback funzionante.
+- `claude/paddleocr-avx`: evoluzione per la macchina CON AVX. Motore
+  PaddleOCR-VL in-process (niente llama-server); stesso parser Markdown,
+  stesso splitter (header letti con Paddle). E' il branch su cui si lavora.
+- `claude/checkpoint-deterministico`: punto di ripristino storico.
 
 ## 1. Obiettivo del progetto
 Acquisire automaticamente le bolle dei fornitori e riconciliarle con gli

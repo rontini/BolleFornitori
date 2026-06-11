@@ -25,6 +25,10 @@ from .validation import CodiceResolver, valida_bolla
 
 log = logging.getLogger("bolle.pipeline")
 
+# Motori che producono Markdown (pagine separate da \f): per questi si usa il
+# parser per-nome-colonna (parse_articoli), NON quello generico posizionale.
+_MARKDOWN_ENGINES = {"dots_ocr", "paddleocr_vl"}
+
 
 class _ApiResolver:
     """Adatta AziendaApi all'interfaccia CodiceResolver usata dalla validazione."""
@@ -78,13 +82,13 @@ class Pipeline:
         return esito
 
     def _parse_righe(self, ocr: OcrResult):
-        """Per dots/llama usa SOLO il parser per-nome-colonna; per gli altri il generico.
+        """Per i motori Markdown usa SOLO il parser per-nome-colonna.
 
         Niente fallback al parser generico quando parse_articoli non trova
         nulla: il generico non ha il filtro sul codice articolo e produce
         righe spazzatura dai pezzi di testata (es. '26DT-01997', 'C0088').
         Meglio zero righe oneste che righe inventate."""
-        if self.cfg.ocr.engine == "dots_ocr" and ocr.full_text:
+        if self.cfg.ocr.engine in _MARKDOWN_ENGINES and ocr.full_text:
             from .ocr.dots_ocr import parse_articoli
 
             return parse_articoli(ocr.full_text)
