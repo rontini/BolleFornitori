@@ -16,6 +16,8 @@ anche senza il runtime installato.
 
 from __future__ import annotations
 
+import html as _html
+import re
 from pathlib import Path
 
 from ..config import OcrConfig
@@ -61,7 +63,52 @@ class PaddleOcrVlEngine(OcrEngine):
         self._ensure_loaded()
         img = np.array(Image.open(BytesIO(png_bytes)).convert("RGB"))
         results = self._pipeline.predict(img)  # type: ignore[union-attr]
-        return "\n".join(_markdown_da_risultato(r) for r in results or [])
+        raw = "\n".join(_markdown_da_risultato(r) for r in results or [])
+        # PaddleOCR-VL emette le tabelle in HTML: le convertiamo in tabelle
+        # Markdown a pipe cosi' il parser esistente (per nome colonna) le
+        # gestisce senza modifiche.
+        return _html_tables_to_pipe(raw)
+
+
+_RE_TABLE = re.compile(r"<table\b[^>]*>(.*?)</table>", re.IGNORECASE | re.DOTALL)
+_RE_TR = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+_RE_TD = re.compile(r"<t[dh]\b[^>]*>(.*?)</t[dh]>", re.IGNORECASE | re.DOTALL)
+_RE_TAG = re.compile(r"<[^>]+>")
+
+
+def _html_tables_to_pipe(text: str) -> str:
+    """Converte le tabelle HTML di PaddleOCR-VL in tabelle Markdown a pipe.
+
+    La prima riga di ogni tabella e' trattata come intestazione (riga
+    separatrice `| --- |` inserita sotto): se non contiene intestazioni
+    riconoscibili, il parser a valle la scartera' comunque. Le celle vengono
+    appiattite (newline letterali '\\n' e reali -> spazio) e ripulite da tag
+    residui ed entita' HTML.
+    """
+
+    def _cella(td_html: str) -> str:
+        c = _RE_TAG.sub(" ", td_html)
+        c = _html.unescape(c)
+        c = c.replace("\\n", " ").replace("\n", " ").replace("|", "/")
+        return re.sub(r"\s+", " ", c).strip()
+
+    def _converti(m: re.Match) -> str:
+        righe: list[str] = []
+        for tr in _RE_TR.finditer(m.group(1)):
+            celle = [_cella(td.group(1)) for td in _RE_TD.finditer(tr.group(1))]
+            if celle:
+                righe.append("| " + " | ".join(celle) + " |")
+        if not righe:
+            return ""
+        n_cols = righe[0].count("|") - 1
+        sep = "|" + " --- |" * n_cols
+        corpo = "\n".join(righe[1:])
+        return f"\n{righe[0]}\n{sep}\n{corpo}\n"
+
+    out = _RE_TABLE.sub(_converti, text)
+    # Tag residui fuori tabella (es. <div ...>testo</div>): tieni solo il testo.
+    out = _RE_TAG.sub(" ", out)
+    return _html.unescape(out)
 
 
 def _markdown_da_risultato(res) -> str:

@@ -334,11 +334,14 @@ def _decimale(text: str) -> "Decimal | None":
 # Codice articolo plausibile: solo i pattern reali osservati nelle bolle:
 # - dddddd.dddd       (es. 088578.0163: codice fornitore)
 # - ddddddXXX.dddd    (es. 088552RIP.0077: variante con suffisso lettere, riparazioni)
+# - dddddd.dddd-X/_X  (es. 088076.0077-F, 088643.0077_F: varianti con suffisso finale)
 # - dddddddd          (es. 99951827: codice commerciale/cliente)
 # Esclude alfanumerici generici (numeri DDT, ordini) E P.IVA/codice fiscale
 # italiani (11 cifre), che altrimenti finiscono come "articoli" dalle finte
 # tabelle di testata prodotte dal modello.
-_RE_CODICE_ARTICOLO = re.compile(r"^(?:\d{6}[A-Z]{0,4}\.\d{4}|\d{8})$", re.IGNORECASE)
+_RE_CODICE_ARTICOLO = re.compile(
+    r"^(?:\d{6}[A-Z]{0,4}\.\d{4}(?:[-_][A-Z]{1,3})?|\d{8})$", re.IGNORECASE
+)
 
 
 def _is_codice_articolo(text: str) -> bool:

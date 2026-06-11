@@ -100,23 +100,23 @@ def test_starts_dal_pdf_di_prova_reale():
     camozzi_seg = "documentoditrasportodpr1"
     zinc = "zinccromsrlviabicocca13c"
     infos = [
-        (None, vern),        # pag 1   bolla Verniciatura 01995
-        (None, vern),        # pag 2
-        (None, vern),        # pag 3
-        (None, vern),        # pag 4
-        (None, vern),        # pag 5
-        (None, soft),        # pag 6   SOFT (impronta cambia -> nuova bolla)
-        (None, soft),        # pag 7
-        (None, vern),        # pag 8   Verniciatura 01997 (impronta cambia)
-        (None, vern),        # pag 9
-        (None, vern),        # pag 10  Verniciatura 01961 (NON rilevabile: merge accettato)
-        (1, camozzi),        # pag 11  Camozzi (marker 1/5)
-        (2, camozzi_seg),    # pag 12  marker 2/5: mai inizio anche se impronta cambia
-        (3, camozzi_seg),    # pag 13
-        (4, camozzi_seg),    # pag 14
-        (5, camozzi_seg),    # pag 15
-        (None, zinc),        # pag 16  Zinc-Crom (impronta cambia)
-        (None, zinc),        # pag 17
+        (None, None, vern),        # pag 1   bolla Verniciatura 01995
+        (None, None, vern),        # pag 2
+        (None, None, vern),        # pag 3
+        (None, None, vern),        # pag 4
+        (None, None, vern),        # pag 5
+        (None, None, soft),        # pag 6   SOFT (impronta cambia -> nuova bolla)
+        (None, None, soft),        # pag 7
+        (None, None, vern),        # pag 8   Verniciatura 01997 (impronta cambia)
+        (None, None, vern),        # pag 9
+        (None, None, vern),        # pag 10  Verniciatura 01961 (merge accettato)
+        (1, 5, camozzi),           # pag 11  Camozzi (marker 1/5)
+        (2, 5, camozzi_seg),       # pag 12  marker 2/5: mai inizio
+        (3, 5, camozzi_seg),       # pag 13
+        (4, 5, camozzi_seg),       # pag 14
+        (5, 5, camozzi_seg),       # pag 15
+        (None, None, zinc),        # pag 16  Zinc-Crom (impronta cambia)
+        (None, None, zinc),        # pag 17
     ]
     starts = _starts_from_scan(infos)
     assert starts == [5, 7, 10, 15]
@@ -134,4 +134,20 @@ def test_starts_bolla_singola_multipagina_stessa_impronta():
     # Caso produzione: DDT di 3 pagine dello stesso fornitore, marker illeggibile
     # -> nessuno split.
     fp = "fornitorequalunquesrlsed"
-    assert _starts_from_scan([(None, fp), (None, fp), (None, fp)]) == []
+    assert _starts_from_scan([(None, None, fp), (None, None, fp), (None, None, fp)]) == []
+
+
+def test_marker_1_su_n_blocca_falsi_split_da_impronta_variabile():
+    # Caso PaddleOCR: il marker '1/5' e' letto sulla prima pagina, ma le
+    # impronte delle pagine interne variano (l'OCR dell'header non e' stabile).
+    # Il totale del marker dice che le 4 pagine successive sono continuazione:
+    # NESSUN falso split anche se l'impronta cambia e il marker non si legge.
+    infos = [
+        (1, 5, "improntaA"),
+        (None, None, "improntaB"),   # diversa, ma attesa come continuazione
+        (None, None, "improntaC"),
+        (2, 5, "improntaD"),         # marker letto male come 2/5: comunque continuazione
+        (None, None, "improntaE"),
+        (None, None, "altrofornitore"),  # pag 6: fuori dall'atteso -> nuova bolla
+    ]
+    assert _starts_from_scan(infos) == [0, 5]

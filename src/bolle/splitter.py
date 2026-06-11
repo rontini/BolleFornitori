@@ -89,7 +89,7 @@ def split_pdf(
     return out_paths
 
 
-def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, str]]:
+def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, int | None, str]]:
     """Per ogni pagina: (numero nel marker 'Pagina N/M' se letto, impronta fornitore).
 
     L'impronta e' derivata dalle prime righe della trascrizione dell'header
@@ -104,7 +104,7 @@ def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, str]]:
 
         paddle_engine = PaddleOcrVlEngine(cfg)
 
-    out: list[tuple[int | None, str]] = []
+    out: list[tuple[int | None, int | None, str]] = []
     for i in range(len(doc)):
         text = _ocr_top_of_page(doc[i], cfg, paddle_engine)
         page_num, total = _parse_marker(text)
@@ -112,7 +112,7 @@ def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, str]]:
         log.info(
             "splitter: pagina %d -> n=%s/%s, impronta '%s'", i + 1, page_num, total, fp
         )
-        out.append((page_num, fp))
+        out.append((page_num, total, fp))
     return out
 
 
@@ -128,21 +128,28 @@ def _fingerprint(text: str) -> str:
     return alnum[:24]
 
 
-def _starts_from_scan(infos: list[tuple[int | None, str]]) -> list[int]:
+def _starts_from_scan(infos: list[tuple[int | None, int | None, str]]) -> list[int]:
     """Indici 0-based delle pagine che iniziano una nuova bolla.
 
     Regole:
-      - marker 'Pagina 1/N' -> inizio bolla;
+      - marker 'Pagina 1/N' -> inizio bolla; se N e' noto, le successive N-1
+        pagine sono continuazione ATTESA (nessun controllo sull'impronta:
+        l'OCR dell'header puo' variare fra pagine della stessa bolla);
       - marker 'Pagina K/N' con K>1 -> continuazione (mai inizio);
-      - marker illeggibile -> inizio se l'impronta fornitore cambia rispetto
-        alla pagina precedente (carta intestata diversa = bolla diversa).
+      - marker illeggibile e fuori da una continuazione attesa -> inizio se
+        l'impronta fornitore cambia rispetto alla pagina precedente.
     """
     starts: list[int] = []
     prev_fp: str | None = None
-    for i, (num, fp) in enumerate(infos):
+    expected_until = -1  # ultimo indice di continuazione attesa dal marker 1/N
+    for i, (num, total, fp) in enumerate(infos):
         if num == 1:
             starts.append(i)
-        elif num is None and prev_fp is not None and fp and fp != prev_fp:
+            if total and total > 1:
+                expected_until = i + total - 1
+        elif i <= expected_until or num is not None:
+            pass  # continuazione (attesa dal totale, o dichiarata dal marker K/N)
+        elif prev_fp is not None and fp and fp != prev_fp:
             starts.append(i)
         prev_fp = fp
     return starts
