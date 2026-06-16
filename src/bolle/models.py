@@ -48,6 +48,10 @@ class RigaBolla:
     quantita: Decimal | None = None
     prezzo_unitario: Decimal | None = None
     totale_riga: Decimal | None = None
+    # Codice commerciale/interno del cliente, spesso stampato in descrizione
+    # accanto al nome articolo (es. "99928399 CARTER..."): e' tipicamente la
+    # chiave migliore per il match con il gestionale.
+    codice_commerciale: str | None = None
     codice_interno: str | None = None       # risolto via cross reference / anagrafica
     risolto: bool = False
     note: list[str] = field(default_factory=list)

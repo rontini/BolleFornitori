@@ -206,19 +206,31 @@ _SEP_CELL = re.compile(r"^:?-{2,}:?$")
 
 # Sinonimi di intestazione che il modello puo' produrre, per colonna logica.
 _HEADER_ALIASES = {
-    "codice": ("codice", "nr.", "nr", "codice articolo", "articolo", "n.", "n"),
+    "codice": ("codice", "nr", "codice articolo", "articolo", "n"),
     "descrizione": ("descrizione", "denominazione"),
-    "quantita": ("quantita", "quantità", "qta", "q.ta", "qty"),
+    "quantita": ("quantita", "quantità", "qta", "qty"),
     "udm": ("udm", "u.d.m.", "u.m.", "um"),
-    "prezzo": ("prezzo", "prezzo unitario", "prezzo unit."),
+    "prezzo": ("prezzo", "prezzo unitario", "prezzo unit"),
     "totale": ("totale", "importo", "totale riga"),
+}
+
+
+def _norm_token(text: str) -> str:
+    """Normalizza un testo header: minuscolo, senza spazi/punti/due-punti.
+    Mantiene le lettere accentate (es. 'Quantità' -> 'quantità')."""
+    return re.sub(r"[\s.:]+", "", text.strip().lower())
+
+
+# Aliases pre-normalizzati per il confronto (es. 'u.d.m.' -> 'udm').
+_HEADER_ALIASES_NORM = {
+    key: {_norm_token(a) for a in aliases} for key, aliases in _HEADER_ALIASES.items()
 }
 
 
 def _normalize_header(text: str) -> str | None:
     """Mappa un testo di intestazione a uno dei nomi logici di colonna (o None)."""
-    t = text.strip().lower().rstrip(".:")
-    for key, aliases in _HEADER_ALIASES.items():
+    t = _norm_token(text)
+    for key, aliases in _HEADER_ALIASES_NORM.items():
         if t in aliases:
             return key
     return None
@@ -485,6 +497,41 @@ _RE_ARTICOLO_IN_DESCR = re.compile(
 )
 
 
+# Quantita' finita nella colonna sbagliata: "✓ 1 NR C", "3 NR", "15 PZ"...
+_RE_QTA_DA_TESTO = re.compile(r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(?:NR|PZ|N|KG|MT)\b", re.IGNORECASE)
+# Descrizione che COMINCIA con "<8 cifre> <nome>" + eventuali metadati in coda.
+_RE_DESCR_COMMERCIALE = re.compile(
+    r"^(?P<com>\d{8})\s+"
+    r"(?P<name>[^\n]+?)"
+    r"(?:\s+(?:Nr\.|Rif\.|Rf\.|Ordine\b|Vs\.).*)?$",
+    re.IGNORECASE,
+)
+
+
+def _qta_da_testo(text: str) -> "Decimal | None":
+    if not text:
+        return None
+    m = _RE_QTA_DA_TESTO.search(text)
+    return _decimale(m.group(1)) if m else None
+
+
+def _raffina_descrizione(riga: "RigaBolla") -> None:
+    """Se la descrizione e' "<codice commerciale 8 cifre> <NOME> <metadati>",
+    sposta il codice commerciale nel campo dedicato e tiene in descrizione solo
+    il nome articolo. Conservativo: agisce solo quando la descrizione COMINCIA
+    con un codice a 8 cifre (righe pulite), lasciando intatti i blob disordinati."""
+    # Caso fallback: il codice letto E' gia' il commerciale a 8 cifre.
+    if re.fullmatch(r"\d{8}", riga.codice_letto):
+        riga.codice_commerciale = riga.codice_letto
+    if not riga.descrizione:
+        return
+    m = _RE_DESCR_COMMERCIALE.match(riga.descrizione.strip())
+    if not m:
+        return
+    riga.codice_commerciale = m.group("com")
+    riga.descrizione = m.group("name").strip() or None
+
+
 def _articolo_da_descrizione(desc_text: str) -> tuple[str, str] | None:
     """Estrae (codice 8-cifre, descrizione pulita) dal testo descrizione, se
     presente in forma '<8 cifre> <TESTO MAIUSCOLO>'. Restituisce None altrimenti."""
@@ -525,16 +572,23 @@ def _parse_segment(segment: str) -> list["RigaBolla"]:
             if codice in visti:
                 continue  # righe-metadati ripetono il codice della riga merce
             visti.add(codice)
-            out.append(
-                RigaBolla(
-                    numero_riga=len(out) + 1,
-                    codice_letto=codice,
-                    descrizione=descrizione or None,
-                    quantita=_decimale(cell(row, "quantita")),
-                    prezzo_unitario=_decimale(cell(row, "prezzo")),
-                    totale_riga=_decimale(cell(row, "totale")),
-                )
+
+            quantita = _decimale(cell(row, "quantita"))
+            if quantita is None:
+                # PaddleOCR talvolta mette la quantita' nella colonna U.d.M
+                # (es. "✓ 1 NR C"): la recuperiamo dal testo dell'unita'.
+                quantita = _qta_da_testo(cell(row, "udm"))
+
+            riga = RigaBolla(
+                numero_riga=len(out) + 1,
+                codice_letto=codice,
+                descrizione=descrizione or None,
+                quantita=quantita,
+                prezzo_unitario=_decimale(cell(row, "prezzo")),
+                totale_riga=_decimale(cell(row, "totale")),
             )
+            _raffina_descrizione(riga)
+            out.append(riga)
     if out:
         return out
     return _parse_articoli_freetext(segment)

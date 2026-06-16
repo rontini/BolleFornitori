@@ -56,6 +56,37 @@ def test_factory_costruisce_dots_ocr():
     assert engine.__class__.__name__ == "DotsOcrEngine"
 
 
+def test_codice_commerciale_estratto_e_descrizione_pulita():
+    # Riga reale Paddle (bolla01 pag2): codice fornitore in colonna,
+    # commerciale + nome + metadati in descrizione.
+    md = """| Nr. | Descrizione | Quantità | U.d.M. |
+| --- | --- | --- | --- |
+| 088631.0127 | 99937761 MANIGLIA MYRAY SX VERN. Nr. commessa cliente: 405MAG Rif. Vs DDT 19 del 13/01/26 | 32 | NR |
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    r = parse_articoli(md)[0]
+    assert r.codice_letto == "088631.0127"          # codice fornitore
+    assert r.codice_commerciale == "99937761"       # codice interno per Oracle
+    assert r.descrizione == "MANIGLIA MYRAY SX VERN."  # solo il nome
+    assert str(r.quantita) == "32"
+
+
+def test_quantita_recuperata_dalla_colonna_udm():
+    # Bolla03 riparazioni: Paddle mette la quantita' nella colonna U.d.M.
+    md = """| Nr. | Descrizione | Quantità | U.d.M. |
+| --- | --- | --- | --- |
+| 088552RIP.0077 | 99924684 ASS.BRACCIO ORIZZ.CRIC. (VERN) Nr. commessa cliente: S8 |  | ✓ 1 NR C |
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    r = parse_articoli(md)[0]
+    assert r.codice_letto == "088552RIP.0077"
+    assert r.codice_commerciale == "99924684"
+    assert r.descrizione == "ASS.BRACCIO ORIZZ.CRIC. (VERN)"
+    assert str(r.quantita) == "1"   # recuperata da "✓ 1 NR C"
+
+
 def test_markdown_table_diventa_righe_parsabili():
     md = """Numero ordine: ORD100  Fornitore: ACME
 
@@ -347,9 +378,10 @@ Nr. Descrizione Quantita U.d.M.
     # Pagina 1: articoli in prosa con quantita' patchate per posizione.
     assert str(per_codice["99951827"].quantita) == "18"
     assert str(per_codice["99928399"].quantita) == "3"
-    # Pagina 2: tabella vera letta con colonne giuste, metadati dedupati.
+    # Pagina 2: tabella vera; codice commerciale estratto e descrizione pulita.
     assert str(per_codice["088631.0127"].quantita) == "32"
-    assert per_codice["088631.0127"].descrizione == "99937761 MANIGLIA MYRAY SX VERNN"
+    assert per_codice["088631.0127"].codice_commerciale == "99937761"
+    assert per_codice["088631.0127"].descrizione == "MANIGLIA MYRAY SX VERNN"
     assert str(per_codice["088676.0077"].quantita) == "5"
     # Numerazione progressiva globale.
     assert [r.numero_riga for r in righe] == [1, 2, 3, 4]
