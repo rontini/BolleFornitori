@@ -43,21 +43,30 @@ def valida_bolla(bolla: Bolla, resolver: CodiceResolver) -> list[RigaBolla]:
 
 
 def _risolvi_codice(riga: RigaBolla, fornitore: str | None, resolver: CodiceResolver) -> None:
-    # Alcuni fornitori stampano in bolla il NOSTRO codice (colonna 'Vs. CODICE'):
-    # in quel caso il parser lo ha gia' messo in codice_interno e la riga e'
-    # risolta senza passare dalla cross-reference.
+    # 1) Alcuni fornitori stampano in bolla il NOSTRO codice (colonna 'Vs. CODICE'):
+    #    il parser lo ha gia' messo in codice_interno -> riga gia' risolta.
     if riga.codice_interno:
         riga.risolto = True
         riga.note.append("codice interno pre-risolto dalla bolla (Vs. CODICE)")
         return
 
+    # 2) Codice commerciale (es. 99xxxxxx) = NOSTRO codice interno, stampato in
+    #    descrizione accanto al nome articolo. E' la chiave preferita: lo
+    #    validiamo direttamente in anagrafica (niente cross-reference).
+    if riga.codice_commerciale and resolver.esiste_in_anagrafica(riga.codice_commerciale):
+        riga.codice_interno = riga.codice_commerciale
+        riga.risolto = True
+        riga.note.append("risolto via codice commerciale (anagrafica)")
+        return
+
+    # 3) Codice fornitore -> cross reference verso il codice interno.
     interno = resolver.da_cross_reference(fornitore, riga.codice_letto)
     if interno is not None:
         riga.codice_interno = interno
         riga.risolto = True
         return
 
-    # Il fornitore potrebbe gia usare il codice interno.
+    # 4) Il fornitore potrebbe gia usare il codice interno.
     if resolver.esiste_in_anagrafica(riga.codice_letto):
         riga.codice_interno = riga.codice_letto
         riga.risolto = True

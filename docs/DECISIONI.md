@@ -124,8 +124,14 @@ Moduli sotto `src/bolle/`:
    che lo splitter trovi ~6 bolle e che i JSON siano puliti.
 6. **Formato Zinc-Crom** (tabella `Articolo/Article Code` con codici `GPS
    99xxxxxx`): non ancora gestito, righe perse. Da fare se rilevante.
+6b. **[DECISO] Chiave di match = codice commerciale (99xxxxxx)**: e' il NOSTRO
+    codice interno, spesso stampato in descrizione accanto al nome articolo.
+    Estratto in RigaBolla.codice_commerciale; la validazione lo valida in
+    anagrafica e lo usa come codice_interno (salta la cross-reference). Il
+    codice fornitore (088xxx) resta in codice_letto come riferimento.
 7. **Contratto API Oracle**: endpoint, payload, autenticazione (oggi
-   `backend: memory`).
+   `backend: memory`). Le API dovranno esporre l'anagrafica per validare i
+   codici commerciali e gli ordini per la riconciliazione.
 8. **Abilitazione AVX sulla VM** (in parallelo, via richiesta a chi gestisce
    VMware): sblocca PaddleOCR-VL/GLM-OCR e accelera l'inferenza.
 

@@ -22,6 +22,29 @@ def _row(*texts, conf=1.0):
     return TableRow(cells=[TableCell(text=t, confidence=conf) for t in texts])
 
 
+def test_codice_commerciale_e_chiave_di_match():
+    # Il codice commerciale (99xxxxxx) e' il NOSTRO codice: se esiste in
+    # anagrafica la riga e' risolta, anche se il codice fornitore non lo e'.
+    api = InMemoryAziendaApi(anagrafica={"99928399"})
+    bolla = Bolla(
+        documento_id="D",
+        kind=DocumentKind.PDF_TEXT,
+        testata=Testata(fornitore="VERNICIATURA"),
+        righe=[
+            RigaBolla(
+                1,
+                "088608.0401",                  # codice fornitore (non in anagrafica)
+                codice_commerciale="99928399",  # nostro codice (in anagrafica)
+                quantita=Decimal(15),
+            )
+        ],
+    )
+    in_rev = valida_bolla(bolla, _Resolver(api))
+    assert in_rev == []
+    assert bolla.righe[0].risolto is True
+    assert bolla.righe[0].codice_interno == "99928399"
+
+
 def test_parse_riga_formato_italiano():
     ocr = OcrResult(rows=[_row("ART-100", "Bulloni M8", "10", "1,50", "15,00")])
     righe = parse_lines(ocr, confidence_threshold=0.8)
