@@ -475,6 +475,27 @@ def parse_articoli(markdown: str) -> list["RigaBolla"]:
     return out
 
 
+# Per recuperare gli articoli quando PaddleOCR-VL sfasa la colonna codice e
+# lascia la cella vuota: cerca, nella descrizione, "<8 cifre> <NOME ARTICOLO>"
+# (testo principalmente maiuscolo, separato dal prossimo blocco di metadati).
+_RE_ARTICOLO_IN_DESCR = re.compile(
+    r"(?<![0-9A-Za-z.])(?P<codice>\d{8})(?!\d)\s+"
+    r"(?P<desc>[A-Z][A-Z0-9 .,/()\-]{2,80}?)"
+    r"(?=\s+(?:Nr\.|Rif\.|Ref\.|Ordine\s|Vs\.|Rf\.|\d{8})|\s*$)"
+)
+
+
+def _articolo_da_descrizione(desc_text: str) -> tuple[str, str] | None:
+    """Estrae (codice 8-cifre, descrizione pulita) dal testo descrizione, se
+    presente in forma '<8 cifre> <TESTO MAIUSCOLO>'. Restituisce None altrimenti."""
+    if not desc_text:
+        return None
+    m = _RE_ARTICOLO_IN_DESCR.search(desc_text)
+    if not m:
+        return None
+    return m.group("codice"), m.group("desc").strip()
+
+
 def _parse_segment(segment: str) -> list["RigaBolla"]:
     """Parsa una singola pagina: prima TUTTE le tabelle, poi fallback freetext."""
     from ..models import RigaBolla
@@ -490,8 +511,17 @@ def _parse_segment(segment: str) -> list["RigaBolla"]:
 
         for row in table.rows:
             codice = cell(row, "codice").strip()
+            descrizione = cell(row, "descrizione")
             if not _is_codice_articolo(codice):
-                continue  # scarta righe di testata travestite da articoli
+                # Fallback: la cella codice e' vuota/non valida ma la
+                # descrizione contiene un "<codice 8-cifre> <NOME ARTICOLO>".
+                # E' la firma del codice commerciale del cliente, ottimo per
+                # il match con Oracle. Capita quando PaddleOCR-VL sfasa la
+                # colonna codice di una riga.
+                rec = _articolo_da_descrizione(descrizione)
+                if rec is None:
+                    continue
+                codice, descrizione = rec
             if codice in visti:
                 continue  # righe-metadati ripetono il codice della riga merce
             visti.add(codice)
@@ -499,7 +529,7 @@ def _parse_segment(segment: str) -> list["RigaBolla"]:
                 RigaBolla(
                     numero_riga=len(out) + 1,
                     codice_letto=codice,
-                    descrizione=cell(row, "descrizione") or None,
+                    descrizione=descrizione or None,
                     quantita=_decimale(cell(row, "quantita")),
                     prezzo_unitario=_decimale(cell(row, "prezzo")),
                     totale_riga=_decimale(cell(row, "totale")),

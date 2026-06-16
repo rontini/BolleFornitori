@@ -7,6 +7,50 @@ from bolle.parsing import parse_lines
 from bolle.ocr.base import OcrResult
 
 
+def test_articolo_da_descrizione_estrae_codice_e_nome():
+    from bolle.ocr.dots_ocr import _articolo_da_descrizione
+
+    rec = _articolo_da_descrizione(
+        "Vs. Ordine Nr. 25402153-OC-00040 del 99951827 COPERTURA LATERALE (VERN)"
+    )
+    assert rec == ("99951827", "COPERTURA LATERALE (VERN)")
+
+
+def test_articolo_da_descrizione_si_ferma_al_prossimo_blocco():
+    # Quando dopo la descrizione iniziano i metadati, ci fermiamo.
+    from bolle.ocr.dots_ocr import _articolo_da_descrizione
+
+    rec = _articolo_da_descrizione(
+        "Nr. commessa cliente: 400MAG Rif. Vs DDT 2203 99928399 CARTER LATO ASPIRAZIONE Nr. commessa cliente: 400MAG"
+    )
+    assert rec == ("99928399", "CARTER LATO ASPIRAZIONE")
+
+
+def test_paddle_riga_con_codice_mancante_recuperata_da_descrizione():
+    # Caso REALE PaddleOCR-VL: la prima riga articolo ha la cella codice vuota
+    # ma il commerciale e' visibile in descrizione. Il parser deve recuperarla.
+    md = """| Nr. | Descrizione | Quantita | U.d.M. |
+| --- | --- | --- | --- |
+|  | Ordine 26ODV00156 del 20/01/2026 |  |  |
+|  | Vs. Ordine Nr. 25402153-OC-00040 del 99951827 COPERTURA LATERALE (VERN) | 18 | NR |
+| 088632.0127 | 99937760 MANIGLIA MYRAY DX VERN. | 32 | NR |
+"""
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    righe = parse_articoli(md)
+    per_codice = {r.codice_letto: r for r in righe}
+    # Recuperata: codice commerciale + descrizione pulita + quantita' dalla riga
+    assert "99951827" in per_codice
+    assert per_codice["99951827"].descrizione == "COPERTURA LATERALE (VERN)"
+    assert str(per_codice["99951827"].quantita) == "18"
+    # Riga con codice colonna valido: NON viene riscritta dal fallback
+    assert "088632.0127" in per_codice
+    assert str(per_codice["088632.0127"].quantita) == "32"
+    # La riga "Ordine 26ODV00156 del..." (senza ne' codice valido ne' commerciale
+    # in descrizione) NON deve diventare un articolo.
+    assert len(righe) == 2
+
+
 def test_factory_costruisce_dots_ocr():
     engine = build_engine(OcrConfig(engine="dots_ocr"))
     assert engine.__class__.__name__ == "DotsOcrEngine"
