@@ -72,6 +72,29 @@ def test_codice_commerciale_estratto_e_descrizione_pulita():
     assert str(r.quantita) == "32"
 
 
+def test_codice_commerciale_inline_in_blob_paddle():
+    # Caso REALE bolla01 pag1: PaddleOCR concatena metadati di piu' articoli
+    # nella stessa cella; il commerciale e' "in mezzo" al blob, non all'inizio.
+    blob = (
+        "Nr. commessa cliente: 400MAG Rif. Vs DDT 2203 del 24/09/25 - SALDO "
+        "Rif. Vs DDT 3956 del 17/10/25 - ACCONTO Ordine 26ODV00324 del 04/02/2026 "
+        "Vs. Ordine Nr. OC/26404399 del 99928399 CARTER LATO ASPIRAZIONE SKEM (NERO) "
+        "Nr. commessa cliente: 400MAG"
+    )
+    md = (
+        "| Nr. | Descrizione | Quantità | U.d.M. |\n"
+        "| --- | --- | --- | --- |\n"
+        f"| 088578.0163 | {blob} | 3 | NR |\n"
+    )
+    from bolle.ocr.dots_ocr import parse_articoli
+
+    r = parse_articoli(md)[0]
+    assert r.codice_letto == "088578.0163"          # codice fornitore intatto
+    assert r.codice_commerciale == "99928399"       # estratto dal blob
+    assert r.descrizione == "CARTER LATO ASPIRAZIONE SKEM (NERO)"
+    assert str(r.quantita) == "3"
+
+
 def test_quantita_recuperata_dalla_colonna_udm():
     # Bolla03 riparazioni: Paddle mette la quantita' nella colonna U.d.M.
     md = """| Nr. | Descrizione | Quantità | U.d.M. |

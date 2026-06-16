@@ -506,6 +506,13 @@ _RE_DESCR_COMMERCIALE = re.compile(
     r"(?:\s+(?:Nr\.|Rif\.|Rf\.|Ordine\b|Vs\.).*)?$",
     re.IGNORECASE,
 )
+# "<8 cifre> <NOME MAIUSCOLO>" in MEZZO al testo (per i blob di pagina 1 dove
+# il commerciale e' annegato fra metadati di vari Ordini/DDT).
+_RE_DESCR_COMMERCIALE_INLINE = re.compile(
+    r"(?<![0-9A-Za-z.])(?P<com>\d{8})(?!\d)\s+"
+    r"(?P<name>[A-Z][A-Z0-9 .,/()\-]{2,80}?)"
+    r"(?=\s+(?:Nr\.|Rif\.|Rf\.|Ordine\b|Vs\.|\d{8})|\s*$)"
+)
 
 
 def _qta_da_testo(text: str) -> "Decimal | None":
@@ -516,20 +523,24 @@ def _qta_da_testo(text: str) -> "Decimal | None":
 
 
 def _raffina_descrizione(riga: "RigaBolla") -> None:
-    """Se la descrizione e' "<codice commerciale 8 cifre> <NOME> <metadati>",
-    sposta il codice commerciale nel campo dedicato e tiene in descrizione solo
-    il nome articolo. Conservativo: agisce solo quando la descrizione COMINCIA
-    con un codice a 8 cifre (righe pulite), lasciando intatti i blob disordinati."""
+    """Sposta il codice commerciale (8 cifre + NOME ARTICOLO) dalla descrizione
+    al campo dedicato, lasciando in descrizione solo il nome articolo.
+
+    Cerca il pattern PRIMA all'inizio (caso pulito), POI ovunque nel blob (caso
+    PaddleOCR pag1 con metadati di piu' articoli concatenati in una cella).
+    """
     # Caso fallback: il codice letto E' gia' il commerciale a 8 cifre.
     if re.fullmatch(r"\d{8}", riga.codice_letto):
         riga.codice_commerciale = riga.codice_letto
     if not riga.descrizione:
         return
-    m = _RE_DESCR_COMMERCIALE.match(riga.descrizione.strip())
+    testo = riga.descrizione.strip()
+    m = _RE_DESCR_COMMERCIALE.match(testo) or _RE_DESCR_COMMERCIALE_INLINE.search(testo)
     if not m:
         return
     riga.codice_commerciale = m.group("com")
-    riga.descrizione = m.group("name").strip() or None
+    nome = (m.group("name") if "name" in m.groupdict() else "").strip()
+    riga.descrizione = nome or None
 
 
 def _articolo_da_descrizione(desc_text: str) -> tuple[str, str] | None:
