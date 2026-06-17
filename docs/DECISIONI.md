@@ -4,15 +4,16 @@
 > milestone, cosi' chiunque riparta (anche in una nuova chat) ha il contesto
 > completo senza dover ricostruire la storia.
 
-Ultimo aggiornamento: branch `claude/paddleocr-avx` per la macchina con AVX.
+Ultimo aggiornamento: estrazione codice commerciale, riconoscimento fornitore,
+modalita' di sviluppo `--reuse-ocr`. Branch `claude/paddleocr-avx`, 86 test verdi.
 
 ## 0. Branch
-- `claude/tender-meitner-DV4PC`: pipeline per la VM SENZA AVX (motore
-  dots_ocr via llama.cpp + GLM-OCR-GGUF). Congelato come fallback funzionante.
-- `claude/paddleocr-avx`: evoluzione per la macchina CON AVX. Motore
-  PaddleOCR-VL in-process (niente llama-server); stesso parser Markdown,
-  stesso splitter (header letti con Paddle). E' il branch su cui si lavora.
-- `claude/checkpoint-deterministico`: punto di ripristino storico.
+- `claude/paddleocr-avx` — **branch attivo**. Macchina con AVX, motore
+  PaddleOCR-VL in-process. Stesso parser/splitter di dots_ocr, output Markdown
+  con tabelle pipe (conversione automatica HTML→pipe).
+- `claude/tender-meitner-DV4PC` — fallback per CPU/VM senza AVX (motore
+  `dots_ocr` via llama.cpp + GLM-OCR-GGUF). Congelato, funzionante.
+- `claude/checkpoint-deterministico` — punto di ripristino storico.
 
 ## 1. Obiettivo del progetto
 Acquisire automaticamente le bolle dei fornitori e riconciliarle con gli
@@ -23,162 +24,158 @@ zero dati verso l'esterno.
 Riferimento: documento di analisi `Analisi_bolle_fornitori.docx`.
 
 ## 2. Architettura in una riga
-Strato percettivo (OCR/LLM) → strato deterministico (parsing, validazione,
+Strato percettivo (OCR) → strato deterministico (parsing, validazione,
 riconciliazione). **L'AI vive solo nello strato percettivo**, tutto il resto
 e' deterministico e verificabile.
 
 Moduli sotto `src/bolle/`:
-- `router.py`: classifica PDF nativo vs scansione vs XML
-- `ocr/pdf_text.py`: estrazione PDF nativi (PyMuPDF, niente OCR)
-- `ocr/paddleocr_vl.py`: adapter PaddleOCR-VL (richiede AVX, ad oggi inutilizzato)
-- `ocr/glm_ocr.py`: adapter GLM-OCR via paddlex (richiede AVX)
-- `ocr/dots_ocr.py`: adapter llama.cpp (funziona su CPU senza AVX, oggi usato
-  con il modello `ggml-org/GLM-OCR-GGUF`)
-- `fatturapa.py`: parser XML FatturaPA
-- `header_extractor.py`: estrazione testata (Ollama + fallback regex)
-- `parsing.py`: parsing righe generico (per gli OCR diversi da dots/llama)
-- `validation.py`: risoluzione codice + verifica aritmetica
-- `api_client.py`: client API aziendali (`http` reale o `memory` offline)
-- `reconciliation.py`: motore di riconciliazione deterministica
-- `review_queue.py`: persistenza coda di revisione (JSON)
-- `pipeline.py`: orchestratore per singolo documento
-- `cli.py`: entry point (`python -m bolle.cli`)
+- `router.py` — classifica PDF nativo vs scansione vs XML
+- `ocr/pdf_text.py` — estrazione PDF nativi (PyMuPDF, niente OCR)
+- `ocr/paddleocr_vl.py` — **motore primario** (branch AVX); converte le
+  tabelle HTML di Paddle in pipe-Markdown
+- `ocr/dots_ocr.py` — adapter llama.cpp (branch no-AVX); contiene anche il
+  parser Markdown usato da entrambi gli adapter
+- `ocr/glm_ocr.py` — adapter alternativo via paddlex
+- `splitter.py` — divide i PDF multi-bolla; saltato con `--no-split`
+- `fatturapa.py` — parser XML FatturaPA
+- `header_extractor.py` — testata via regex + pattern fornitori_noti
+- `parsing.py` — parser righe generico (motori non-Markdown)
+- `validation.py` — risoluzione codice + verifica aritmetica
+- `api_client.py` — client API aziendali (`http` reale o `memory` offline)
+- `reconciliation.py` — motore di riconciliazione deterministico
+- `review_queue.py` — coda di revisione (persistenza JSON)
+- `pipeline.py` — orchestratore per singolo documento
+- `cli.py` — entry point (`python -m bolle.cli`)
 
-## 3. Configurazione macchina utente
-- **Windows Server 2016** su VMware (VM con Xeon Gold 6134, 160 GB RAM, no GPU).
-- **AVX mascherato dall'hypervisor**: PaddlePaddle non parte (`libpaddle.pyd`
-  fallisce). Per sbloccare PaddleOCR-VL servirebbe abilitare EVC=Skylake o
-  superiore sulla VM (richiede admin VMware).
-- Workaround attuale: **llama.cpp + GGUF**, che gira su CPU senza AVX.
-- Modello: **GLM-OCR-GGUF** (`ggml-org/GLM-OCR-GGUF`), servito da `llama-server`
-  su `localhost:8080`, comando: `llama-server.exe -hf ggml-org/GLM-OCR-GGUF
-  --flash-attn off -c 24000 --port 8080`.
-- Settings: `engine: dots_ocr`, `dots_server_url: http://localhost:8080`,
-  `dots_max_tokens: 6000`, `request_timeout_s: 3600`. `api.backend: memory`
-  (nessuna API Oracle ancora collegata).
+## 3. Configurazione macchina attuale (con AVX)
+- **Windows** con CPU che espone AVX (la VM senza AVX e' il piano B sul
+  branch `tender-meitner-DV4PC`).
+- Python 3.11+, PaddlePaddle + PaddleOCR installati: il modello PaddleOCR-VL
+  parte in-process (niente llama-server).
+- `engine: paddleocr_vl` in `settings.yaml`; `api.backend: memory` finche'
+  non ci sono le API Oracle.
 
-## 4. Decisioni chiave gia' prese
+## 4. Decisioni chiave
 1. **Pipeline a moduli, additiva**: ogni nuovo motore OCR si aggiunge dietro
    un'interfaccia `OcrEngine` senza toccare il resto.
 2. **API selezionabile** (`backend: http | memory`): `memory` permette di
    validare l'OCR senza l'Oracle aziendale.
-3. **Streaming SSE verso llama-server**: niente timeout di lettura su CPU
-   lente; l'avanzamento `pagina N [fase] · token letti` aiuta a vedere la run.
-4. **Due chiamate OCR per pagina** (`testata` + `tabella`): output instabile
-   con un solo prompt; il vision-encode si paga due volte ma le risposte sono
-   piu' affidabili.
-5. **Parser articoli con due livelli**:
-   (a) tabella Markdown con mapping per nome di colonna,
-   (b) fallback regex su testo libero (`\\d{6}\\.\\d{4}` o `\\d{8}` a inizio riga).
-6. **Filtro "codice articolo plausibile"**: scarta righe la cui prima cella
-   contiene lettere/trattini (es. `26DGT-01995`): erano pezzi di testata
-   travestiti da articoli da tabelle Markdown fasulle.
-7. **Distinzione ordine cliente vs fornitore**: `numero_ordine` = "Vs. Ordine"
-   (cliente, usato per il match Oracle); `numero_ordine_fornitore` = "Ordine"
-   bare (rif. interno del fornitore).
-8. **Sviluppo via ZIP**: l'utente non ha git installato; ogni sync = scaricare
-   ZIP da GitHub e fare `Copy-Item` sopra la cartella di lavoro. Il branch di
-   lavoro e' `claude/tender-meitner-DV4PC`. Backup di sicurezza su
-   `claude/checkpoint-deterministico`.
+3. **Conversione HTML→pipe** all'uscita da PaddleOCR-VL: tutto il parser
+   esistente (per nome colonna) funziona identico, indipendente dal motore.
+4. **Parser articoli con piu' livelli**:
+   - tabella Markdown con mapping per nome di colonna (preferito);
+   - fallback regex su testo libero (`dddddd.dddd` / `dddddddd` a inizio riga);
+   - per il formato Camozzi: codice in cella + commerciale in descrizione +
+     pattern multi-riga.
+5. **Filtro "codice articolo plausibile"**: accetta SOLO `dddddd.dddd`
+   (anche con suffisso `RIP`, `-F`, `_F`) o `dddddddd` puri. Esclude P.IVA
+   (11 cifre), numeri DDT, ordini.
+6. **Distinzione ordine cliente vs fornitore**: `testata.numero_ordine` =
+   "Vs. Ordine" (cliente, chiave per match Oracle); `numero_ordine_fornitore`
+   = "Ordine" / "Ns. Ordine" (riferimento interno fornitore).
+7. **DECISO — Chiave di match = codice commerciale `99xxxxxx`**: e' il
+   NOSTRO codice interno, spesso stampato in descrizione accanto al nome
+   articolo. Estratto in `RigaBolla.codice_commerciale`; la validazione lo
+   valida in anagrafica e lo usa come `codice_interno` (salta cross-reference).
+   Il codice fornitore (088xxx) resta in `codice_letto` come riferimento.
+8. **Raffinamento descrizione**: dopo aver estratto il commerciale, la
+   descrizione viene ripulita al solo nome articolo (toglie metadati come
+   "Nr. commessa", "Rif. Vs DDT", "Ordine ...").
+9. **Riconoscimento fornitore via pattern noti** (`fornitori_noti` in
+   `settings.yaml`): il primo pattern regex che matcha sul `.md` vince.
+   Override esplicito via `--fornitore "NOME"`.
+10. **Modalita' di sviluppo `--reuse-ocr`**: ricarica il Markdown gia' salvato
+    in `work/ocr_raw/<stem>.md` e parte dal parser. Iterazione in **secondi**
+    invece di minuti, ideale per tarare parser/validazione.
 
-## 5. Stato di funzionamento
+## 5. Stato di funzionamento (branch AVX)
 
-### Va bene
-- Test suite verde (28+ test).
-- PDF nativi: lettura riga per riga e validazione aritmetica funzionano.
-- FatturaPA: parser dedicato funzionante.
-- Su una **bolla singola/pagina singola con tabella pulita** GLM-OCR legge
-  codici e quantita correttamente (es. pagina 1 della scansione di prova:
-  4/4 codici corretti).
-- Distinzione dei due ordini (cliente/fornitore) funziona.
+### Funziona bene
+- 86 test verdi.
+- PDF nativi (router → PyMuPDF) e XML FatturaPA: completi.
+- **PaddleOCR-VL su una bolla reale di 5 pagine: 17 righe su 18 estratte
+  correttamente** con codice fornitore + codice commerciale + descrizione
+  pulita + quantita'. Solo 1 riga "blob" non recuperabile (l'OCR non ha
+  trascritto il commerciale per quella riga).
+- Splitter multi-bolla con rilevamento via marker `Pagina N/M` + impronta
+  fornitore. Si salta con `--no-split`.
+- Formato Camozzi (`Vs. CODICE` pre-risolto) gestito.
+- Riconoscimento fornitore via `fornitori_noti` (regex sul `.md`) e override
+  CLI.
+- Recupero quantita' anche quando finiscono nella colonna sbagliata
+  (es. `✓ 1 NR` nella cella U.d.M.).
 
-### Va male / aperto
-- **Hallucinazione** del modello su PDF lunghi: tabelle con righe ripetute
-  centinaia di volte (es. `U97003123 SED SEG ST 123 VERDE POLINESIA` x300).
-- **Quantita** non sempre trascritte dal modello; in alcuni casi sono finite
-  troncate nel parser (es. `99937761` → `999377`) perche' il parser ha
-  scambiato il codice commerciale per quantita.
-- **PDF multi-bolla**: il file di prova contiene **almeno 5 documenti diversi**
-  (DDT Verniciatura Bolognese 26DGT-01995, 26DT-01997, 26DT-01961; documento
-  Centro Distributivo Palazzolo; DDT Camozzi). La pipeline oggi tratta tutto
-  come una sola bolla.
-- **Formato Camozzi (Vs. CODICE)**: c'e' una colonna con il codice interno del
-  cliente gia' pre-risolto. Non e' ancora gestita dal parser. Importante perche'
-  evita la cross-reference per quelle righe.
-- **AVX assente** sulla VM: PaddleOCR-VL e GLM-OCR via paddlex non possono
-  essere usati. La soluzione "tecnicamente migliore" dell'analisi e' bloccata
-  fino a quando un admin VMware non abilita EVC Skylake+ (testo richiesta
-  pronto, vedi cronologia chat).
+### Limiti aperti
+- **Formati SOFT e Zinc-Crom**: parser dedicato non ancora scritto (0 o
+  poche righe estratte). Da implementare solo se questi fornitori contano
+  nei volumi di produzione.
+- **Riga "blob" residua**: quando l'OCR non trascrive il commerciale, la
+  riga finisce in revisione manuale. E' il comportamento corretto: il
+  sistema non inventa.
 
-## 6. Prossimi passi (in ordine consigliato)
-1. **[FATTO]** PDF splitter: `src/bolle/splitter.py`. No-op su PDF di 1 pagina
-   o quando non rileva piu' di un marker "Pagina 1/N" (caso comune in
-   produzione). OCR leggero solo sul top 30% di ogni pagina per identificare
-   i confini.
-2. **[FATTO]** Parser formato Camozzi (Vs. CODICE pre-risolto -> salta
-   cross-reference), pattern inline e multi-riga.
-3. **[FATTO]** Parsing per pagina (\f fra le pagine) + estrazione di TUTTE le
-   tabelle: risolve il "999377" e la perdita delle patch quantita'.
-4. **[FATTO]** `repeat_penalty` 1.2 (OCR) / 1.3 (splitter) contro i loop.
-5. **Da validare sul campo**: rilanciare il PDF di prova completo e verificare
-   che lo splitter trovi ~6 bolle e che i JSON siano puliti.
-6. **Formato Zinc-Crom** (tabella `Articolo/Article Code` con codici `GPS
-   99xxxxxx`): non ancora gestito, righe perse. Da fare se rilevante.
-6b. **[DECISO] Chiave di match = codice commerciale (99xxxxxx)**: e' il NOSTRO
-    codice interno, spesso stampato in descrizione accanto al nome articolo.
-    Estratto in RigaBolla.codice_commerciale; la validazione lo valida in
-    anagrafica e lo usa come codice_interno (salta la cross-reference). Il
-    codice fornitore (088xxx) resta in codice_letto come riferimento.
-7. **Contratto API Oracle**: endpoint, payload, autenticazione (oggi
-   `backend: memory`). Le API dovranno esporre l'anagrafica per validare i
-   codici commerciali e gli ordini per la riconciliazione.
-8. **Abilitazione AVX sulla VM** (in parallelo, via richiesta a chi gestisce
-   VMware): sblocca PaddleOCR-VL/GLM-OCR e accelera l'inferenza.
+## 6. Modalita' di lavoro
 
-## 6c. Modalita' di lavoro
-- `--no-split`: salta lo splitter (file gia' singolo). Risparmia ~30 s/pagina
-  di OCR di header.
-- `--reuse-ocr` (sviluppo): ricarica `work/ocr_raw/<stem>.md` gia' prodotto e
-  parte dal parser. Iterare sul parser/validazione in **secondi** invece di
-  minuti — comando chiave per tarare il parser senza ri-eseguire l'OCR.
-- `--pages 1-3`: limita le pagine elaborate.
+| Flag | A cosa serve |
+|---|---|
+| (nessuno) | Splitter + OCR + parser + validazione (caso produzione "tutto") |
+| `--no-split` | PDF gia' singolo, salta lo splitter (~30 s/pagina in meno) |
+| `--pages 1` / `1-3` / `1,5,7` | Elabora solo le pagine indicate |
+| `--reuse-ocr` | **Dev**: ricarica `.md` esistente, parte dal parser (secondi) |
+| `--fornitore "NOME"` | Forza il fornitore in testata (override) |
 
-Esempio dev: dopo aver fatto OCR di una bolla una volta, ogni successivo
-giro per misurare gli effetti di una modifica al parser:
+Esempio dev su una bolla gia' OCRata:
 ```
 python -m bolle.cli --config config\settings.yaml --reuse-ocr work\split\bolla.pdf
 ```
 
+## 7. Prossimi passi (in ordine consigliato)
+1. **Contratto API Oracle**: endpoint, payload, autenticazione (oggi
+   `backend: memory`). E' il vero sblocco: senza, le righe restano in
+   revisione anche se i dati sono giusti. Le API dovranno esporre l'anagrafica
+   (per validare i codici commerciali) e gli ordini (per la riconciliazione).
+2. **Validazione sul flusso reale di produzione**: bolle singole di
+   fornitori diversi, una alla volta. E' il caso "facile" per il modello
+   (molto piu' stabile delle 17 pagine multi-bolla del test).
+3. **Formati SOFT / Zinc-Crom**, solo se rilevanti nei volumi.
 
-## 7. Come ripartire da zero (anche da una chat nuova)
+## 8. Come ripartire da zero (anche da una chat nuova)
 ```bash
-# 1. Clona il repo (o scarica lo ZIP del branch claude/tender-meitner-DV4PC)
+# 1. Clona il repo, branch AVX
 git clone https://github.com/rontini/BolleFornitori.git
 cd BolleFornitori
-git checkout claude/tender-meitner-DV4PC
+git checkout claude/paddleocr-avx
 
-# 2. Ambiente Python (Windows: usa 'py -m venv .venv' e .venv\Scripts\activate.bat)
+# 2. Ambiente Python (Windows: py -m venv .venv && .venv\Scripts\activate.bat)
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[pdf,dev]"
-pytest                       # tutti i test devono passare
+pytest                       # atteso: 86 passed
 
-# 3. Per testare l'OCR su scansioni servono:
-#    a. llama-server in esecuzione su localhost:8080 con GLM-OCR-GGUF
-#    b. config/settings.yaml con engine=dots_ocr, api.backend=memory
-#    c. una scansione di prova in samples/
+# 3. Runtime OCR (solo per le scansioni)
+pip install paddlepaddle paddleocr
+python -c "import paddle; print('paddle', paddle.__version__)"
 
-# 4. Lancia su una sola pagina (per tarare):
-python -m bolle.cli --config config/settings.yaml --pages 1 path/to/scan.pdf
+# 4. Config
+cp config/settings.example.yaml config/settings.yaml
+# verifica: engine: paddleocr_vl, api.backend: memory, fornitori_noti presente
 
-# 5. Ispeziona work/ocr_raw/<id>.md (output grezzo OCR) e
-#    work/revisione/<id>.json (righe estratte).
+# 5. Prima prova su una bolla
+python -m bolle.cli --config config/settings.yaml --no-split path/to/bolla.pdf
+
+# Sviluppo iterativo (dopo il primo OCR): rilancia istantaneamente il parser
+python -m bolle.cli --config config/settings.yaml --reuse-ocr path/to/bolla.pdf
 ```
 
-## 8. File chiave da leggere per il contesto
-- `README.md` — architettura, install, prossimi passi.
-- `docs/INSTALL.md` — guida operativa Windows (PaddleOCR + alternativa
+## 9. File chiave da leggere per il contesto
+- `README.md` — architettura, install, comandi base.
+- `docs/INSTALL.md` — guida operativa Windows (PaddleOCR-VL + alternativa
   llama.cpp).
-- `tests/test_dots_ocr.py` — esempi di Markdown reali con cui il parser deve
-  funzionare (utile per capire i casi gia' visti).
-- `src/bolle/ocr/dots_ocr.py` — prompt OCR e parser. E' il file piu' rumoroso
-  perche' inseguiamo le bizze del modello su CPU.
+- `config/settings.example.yaml` — riferimento per tutte le opzioni
+  (engine, fornitori_noti, api, ecc.).
+- `src/bolle/ocr/paddleocr_vl.py` — adapter Paddle + conversione HTML→pipe.
+- `src/bolle/ocr/dots_ocr.py` — parser Markdown (usato da entrambi gli
+  adapter); contiene la logica di estrazione codice commerciale, dedup,
+  formato Camozzi.
+- `src/bolle/header_extractor.py` — testata + riconoscimento fornitore.
+- `src/bolle/validation.py` — risoluzione codice (anagrafica → cross-ref).
+- `tests/` — ogni decisione importante ha un test sui Markdown reali; per
+  capire i casi gia' visti, leggere i test e' la via piu' veloce.
