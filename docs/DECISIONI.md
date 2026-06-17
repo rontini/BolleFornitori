@@ -135,6 +135,21 @@ Moduli sotto `src/bolle/`:
 8. **Abilitazione AVX sulla VM** (in parallelo, via richiesta a chi gestisce
    VMware): sblocca PaddleOCR-VL/GLM-OCR e accelera l'inferenza.
 
+## 6c. Modalita' di lavoro
+- `--no-split`: salta lo splitter (file gia' singolo). Risparmia ~30 s/pagina
+  di OCR di header.
+- `--reuse-ocr` (sviluppo): ricarica `work/ocr_raw/<stem>.md` gia' prodotto e
+  parte dal parser. Iterare sul parser/validazione in **secondi** invece di
+  minuti — comando chiave per tarare il parser senza ri-eseguire l'OCR.
+- `--pages 1-3`: limita le pagine elaborate.
+
+Esempio dev: dopo aver fatto OCR di una bolla una volta, ogni successivo
+giro per misurare gli effetti di una modifica al parser:
+```
+python -m bolle.cli --config config\settings.yaml --reuse-ocr work\split\bolla.pdf
+```
+
+
 ## 7. Come ripartire da zero (anche da una chat nuova)
 ```bash
 # 1. Clona il repo (o scarica lo ZIP del branch claude/tender-meitner-DV4PC)

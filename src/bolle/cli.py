@@ -50,6 +50,13 @@ def main(argv: list[str] | None = None) -> int:
         help="non eseguire lo splitter multi-bolla: il file viene processato "
              "come una singola bolla. Utile quando passi PDF gia' divisi.",
     )
+    parser.add_argument(
+        "--reuse-ocr",
+        action="store_true",
+        help="non rieseguire l'OCR: ricarica il Markdown gia' prodotto in "
+             "work/ocr_raw/<stem>.md e parte dal parser. Modalita' sviluppo "
+             "per iterare sul parser/validazione in secondi invece di minuti.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -66,12 +73,14 @@ def main(argv: list[str] | None = None) -> int:
 
     exit_code = 0
     for doc in args.documenti:
-        # Splitter: saltiamo se l'utente ha passato --no-split (PDF gia' divisi)
-        # o --pages (sta lavorando su pagine specifiche). Altrimenti proviamo a
-        # splittare i PDF multi-bolla. E' un no-op se il PDF ha 1 pagina o se
-        # troviamo un solo marker "Pagina 1/N".
+        # Splitter: saltiamo se l'utente ha passato --no-split o --reuse-ocr
+        # (in entrambi i casi sta lavorando su un file gia' singolo), o --pages
+        # (sta lavorando su pagine specifiche). Altrimenti proviamo a splittare
+        # i PDF multi-bolla. E' un no-op se il PDF ha 1 pagina o se troviamo
+        # un solo marker "Pagina 1/N".
         sub_documenti = [Path(doc)]
-        if pages is None and not args.no_split and cfg.ocr.splitter_enabled:
+        salta_splitter = pages is not None or args.no_split or args.reuse_ocr
+        if not salta_splitter and cfg.ocr.splitter_enabled:
             try:
                 sub_documenti = split_pdf(Path(doc), cfg.ocr, work_dir=cfg.paths.work / "split")
             except Exception as exc:  # noqa: BLE001
@@ -81,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 
         for sub in sub_documenti:
             try:
-                esito = pipeline.process(sub, pages=pages)
+                esito = pipeline.process(sub, pages=pages, reuse_ocr=args.reuse_ocr)
                 print(
                     f"\n=== {sub} (ordine cliente {esito.numero_ordine} | "
                     f"ordine fornitore {esito.numero_ordine_fornitore}) ==="

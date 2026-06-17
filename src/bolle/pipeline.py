@@ -51,8 +51,17 @@ class Pipeline:
         self._ocr_engine = None  # lazy: si costruisce solo se serve l'OCR
 
     def process(
-        self, path: str | Path, pages: list[int] | None = None
+        self,
+        path: str | Path,
+        pages: list[int] | None = None,
+        reuse_ocr: bool = False,
     ) -> EsitoRiconciliazione:
+        """Elabora un documento.
+
+        Se reuse_ocr=True salta lo strato OCR e ricarica il Markdown gia'
+        prodotto in work/ocr_raw/<stem>.md: utile in sviluppo per iterare sul
+        parser/validazione senza ri-eseguire l'OCR (secondi vs. minuti).
+        """
         path = Path(path)
         kind = router.classify(path)
         log.info("documento %s classificato come %s", path.name, kind.value)
@@ -60,8 +69,17 @@ class Pipeline:
         if kind == DocumentKind.XML_FATTURAPA:
             bolla = fatturapa.parse(path)
         else:
-            ocr = self._read_document(path, kind, pages)
-            self._dump_ocr(path.stem, ocr.full_text)
+            if reuse_ocr:
+                md_path = self.cfg.paths.work / "ocr_raw" / f"{path.stem}.md"
+                if not md_path.exists():
+                    raise FileNotFoundError(
+                        f"--reuse-ocr: nessun OCR precedente trovato in {md_path}"
+                    )
+                log.info("riuso OCR esistente da %s", md_path)
+                ocr = OcrResult(rows=[], full_text=md_path.read_text(encoding="utf-8"))
+            else:
+                ocr = self._read_document(path, kind, pages)
+                self._dump_ocr(path.stem, ocr.full_text)
             bolla = Bolla(documento_id=path.stem, kind=kind)
             bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
             bolla.righe = self._parse_righe(ocr)
