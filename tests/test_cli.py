@@ -77,6 +77,39 @@ def test_flag_reuse_ocr_salta_engine_e_splitter(tmp_path, monkeypatch):
     assert out["righe"][0]["quantita"] == "18"
 
 
+def test_flag_fornitore_override_vince_su_estrazione(tmp_path, monkeypatch):
+    """--fornitore "NOME" sovrascrive qualunque cosa estratta dall'OCR."""
+    import json
+    import pytest
+
+    from bolle import cli
+    from bolle.api_client import build_api
+    from bolle.config import Config
+
+    fitz = pytest.importorskip("fitz")
+    pdf = tmp_path / "fattura.pdf"
+    doc = fitz.open(); doc.new_page(); doc.save(pdf); doc.close()
+    work = tmp_path / "work"
+    (work / "ocr_raw").mkdir(parents=True)
+    (work / "ocr_raw" / "fattura.md").write_text(
+        "| Nr. | Descrizione | Quantita | U.d.M. |\n"
+        "| --- | --- | --- | --- |\n"
+        "| 088578.0163 | 99951827 COPERTURA | 18 | NR |\n",
+        encoding="utf-8",
+    )
+
+    cfg = Config(); cfg.paths.work = work; cfg.paths.review_queue = work / "revisione"
+    cfg.api.backend = "memory"
+
+    monkeypatch.setattr(cli, "Config", type("C", (), {"load": staticmethod(lambda _: cfg)}))
+    monkeypatch.setattr(cli, "build_api", build_api)
+
+    cli.main(["--reuse-ocr", "--fornitore", "ACME SPA", str(pdf)])
+
+    out = json.loads((work / "output" / "fattura.json").read_text(encoding="utf-8"))
+    assert out["testata"]["fornitore"] == "ACME SPA"
+
+
 def test_flag_no_split_disattiva_lo_splitter(tmp_path, monkeypatch):
     # Quando l'utente passa --no-split lo splitter NON viene mai chiamato:
     # il file arriva diretto alla pipeline. Test su un PDF vuoto fittizio.

@@ -35,14 +35,39 @@ TESTO:
 """
 
 
-def extract_header(full_text: str, cfg: LlmConfig) -> Testata:
+def extract_header(
+    full_text: str,
+    cfg: LlmConfig,
+    fornitori_noti: list[dict[str, str]] | None = None,
+) -> Testata:
     if cfg.enabled:
         try:
-            return _extract_via_ollama(full_text, cfg)
+            t = _extract_via_ollama(full_text, cfg)
         except Exception:
             # Fallback robusto: non blocchiamo la pipeline se l'LLM non risponde.
-            pass
-    return _extract_via_regex(full_text)
+            t = _extract_via_regex(full_text)
+    else:
+        t = _extract_via_regex(full_text)
+    # Riconoscimento fornitore via pattern noti (config-driven). Si applica solo
+    # se l'estrazione precedente non l'ha gia' popolato.
+    if t.fornitore is None and fornitori_noti:
+        t.fornitore = _riconosci_fornitore(full_text, fornitori_noti)
+    return t
+
+
+def _riconosci_fornitore(full_text: str, fornitori_noti: list[dict[str, str]]) -> str | None:
+    """Applica i pattern in ordine: il primo che matcha vince."""
+    for entry in fornitori_noti:
+        pattern = entry.get("pattern", "")
+        nome = entry.get("nome", "")
+        if not pattern or not nome:
+            continue
+        try:
+            if re.search(pattern, full_text, re.IGNORECASE):
+                return nome
+        except re.error:
+            continue  # pattern malformato in config: ignora invece di crashare
+    return None
 
 
 def _extract_via_ollama(full_text: str, cfg: LlmConfig) -> Testata:

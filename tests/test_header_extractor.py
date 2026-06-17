@@ -61,3 +61,32 @@ def test_data_anni_90_non_diventa_2096():
     # il campo resta vuoto.
     t = extract_header("Rif. legge del 14/8/96\n", _cfg())
     assert t.data_bolla is None
+
+
+def test_fornitore_riconosciuto_da_ragione_sociale():
+    fornitori = [{"pattern": r"Verniciatura\s*Bolognese", "nome": "VERNICIATURA BOLOGNESE S.R.L."}]
+    t = extract_header("Verniciatura Bolognese s.r.l.\nIndirizzo...\n", _cfg(), fornitori_noti=fornitori)
+    assert t.fornitore == "VERNICIATURA BOLOGNESE S.R.L."
+
+
+def test_fornitore_riconosciuto_da_numero_bolla():
+    # Caso bolla01: la ragione sociale non e' nel .md, ma il numero bolla 26DT-* lo identifica.
+    fornitori = [{"pattern": r"26DT-\d+", "nome": "VERNICIATURA BOLOGNESE S.R.L."}]
+    md = "CEFLA S.C.\n...\nDocumento di trasporto Nr. 26DT-01995 Data 27/05/2026\n"
+    t = extract_header(md, _cfg(), fornitori_noti=fornitori)
+    assert t.fornitore == "VERNICIATURA BOLOGNESE S.R.L."
+
+
+def test_fornitore_primo_pattern_che_matcha_vince():
+    fornitori = [
+        {"pattern": "SOFT", "nome": "SOFT ITALIA"},
+        {"pattern": "Verniciatura", "nome": "VERNICIATURA"},
+    ]
+    t = extract_header("SOFT Italia S.p.A.\n", _cfg(), fornitori_noti=fornitori)
+    assert t.fornitore == "SOFT ITALIA"
+
+
+def test_fornitore_pattern_malformato_non_crasha():
+    fornitori = [{"pattern": "[unclosed", "nome": "ROTTO"}, {"pattern": "ACME", "nome": "ACME"}]
+    t = extract_header("ACME srl\n", _cfg(), fornitori_noti=fornitori)
+    assert t.fornitore == "ACME"

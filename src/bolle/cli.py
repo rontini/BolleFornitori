@@ -57,6 +57,12 @@ def main(argv: list[str] | None = None) -> int:
              "work/ocr_raw/<stem>.md e parte dal parser. Modalita' sviluppo "
              "per iterare sul parser/validazione in secondi invece di minuti.",
     )
+    parser.add_argument(
+        "--fornitore",
+        default=None,
+        help="forza il nome del fornitore in testata (override); utile quando "
+             "l'OCR non lo trascrive e nessun pattern noto matcha.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -90,7 +96,12 @@ def main(argv: list[str] | None = None) -> int:
 
         for sub in sub_documenti:
             try:
-                esito = pipeline.process(sub, pages=pages, reuse_ocr=args.reuse_ocr)
+                esito = pipeline.process(
+                    sub,
+                    pages=pages,
+                    reuse_ocr=args.reuse_ocr,
+                    fornitore_override=args.fornitore,
+                )
                 print(
                     f"\n=== {sub} (ordine cliente {esito.numero_ordine} | "
                     f"ordine fornitore {esito.numero_ordine_fornitore}) ==="

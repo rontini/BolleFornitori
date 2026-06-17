@@ -55,6 +55,7 @@ class Pipeline:
         path: str | Path,
         pages: list[int] | None = None,
         reuse_ocr: bool = False,
+        fornitore_override: str | None = None,
     ) -> EsitoRiconciliazione:
         """Elabora un documento.
 
@@ -81,8 +82,16 @@ class Pipeline:
                 ocr = self._read_document(path, kind, pages)
                 self._dump_ocr(path.stem, ocr.full_text)
             bolla = Bolla(documento_id=path.stem, kind=kind)
-            bolla.testata = extract_header(ocr.full_text, self.cfg.llm)
+            bolla.testata = extract_header(
+                ocr.full_text,
+                self.cfg.llm,
+                fornitori_noti=self.cfg.ocr.fornitori_noti,
+            )
             bolla.righe = self._parse_righe(ocr)
+
+        # Override esplicito del fornitore (precedenza su qualsiasi estrazione).
+        if fornitore_override:
+            bolla.testata.fornitore = fornitore_override
 
         in_revisione = valida_bolla(bolla, self._resolver)
         log.info(

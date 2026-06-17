@@ -8,6 +8,18 @@ ocr:
   resize_px: 1024             # sweet spot per inferenza su CPU
   table_mode: true
   confidence_threshold: 0.80  # righe sotto soglia -> coda di revisione
+  # Riconoscimento fornitore: il primo pattern che matcha sul .md vince.
+  # I pattern sono regex (case-insensitive). Vanno bene sia ragioni sociali
+  # (es. "Verniciatura\\s*Bolognese") sia firme nel numero bolla (es. "26DT-\\d+").
+  fornitori_noti:
+    - pattern: "Verniciatura\\s*Bolognese|vernibo|26DT-\\d+"
+      nome: "VERNICIATURA BOLOGNESE S.R.L."
+    - pattern: "SOFT\\s*Italia"
+      nome: "SOFT ITALIA S.P.A."
+    - pattern: "Camozzi\\s*Automation"
+      nome: "CAMOZZI AUTOMATION S.P.A."
+    - pattern: "ZINC[\\s\\-]*CROM"
+      nome: "ZINC-CROM S.R.L."
 
 llm:
   enabled: true               # LLM piccolo SOLO per testata e casi sporchi

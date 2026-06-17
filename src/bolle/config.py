@@ -30,6 +30,12 @@ class OcrConfig:
     # immediatamente per PDF di 1 pagina o quando non rileviamo piu' di un
     # marker "Pagina 1/N". Mettilo a False per disattivarlo del tutto.
     splitter_enabled: bool = True
+    # Riconoscimento fornitore: lista di {pattern, nome} dove "pattern" e' una
+    # regex applicata al .md OCR e "nome" e' la ragione sociale canonica del
+    # fornitore. Il primo pattern che matcha vince. Esempi tipici: il numero
+    # bolla che segue uno schema fornitore-specifico (26DT-\\d+ per Verniciatura)
+    # o la ragione sociale stampata sull'intestazione (es. "SOFT\\s*Italia").
+    fornitori_noti: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
