@@ -63,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
         help="forza il nome del fornitore in testata (override); utile quando "
              "l'OCR non lo trascrive e nessun pattern noto matcha.",
     )
+    parser.add_argument(
+        "--split-only",
+        action="store_true",
+        help="esegue SOLO lo splitter (divide il PDF e scrive i sidecar col "
+             "fornitore), senza OCR ne' parsing. Veloce: OCR solo degli header.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -76,6 +82,20 @@ def main(argv: list[str] | None = None) -> int:
     cfg = Config.load(args.config)
     api = build_api(cfg.api)
     pipeline = Pipeline(cfg, api)
+
+    # Modalita' "solo split": divide il PDF e scrive i sidecar (fornitore),
+    # senza OCR/parsing. Utile per (ri)generare i collegamenti fornitore.
+    if args.split_only:
+        for doc in args.documenti:
+            parti = split_pdf(Path(doc), cfg.ocr, work_dir=cfg.paths.work / "split")
+            for p in parti:
+                meta = p.with_suffix(".meta.json")
+                forn = ""
+                if meta.exists():
+                    import json
+                    forn = json.loads(meta.read_text(encoding="utf-8")).get("fornitore", "")
+                print(f"  {p}  ->  fornitore: {forn or '(non rilevato)'}")
+        return 0
 
     exit_code = 0
     for doc in args.documenti:

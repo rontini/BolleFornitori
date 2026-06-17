@@ -70,6 +70,10 @@ def split_pdf(
 
         if len(boundaries) <= 1:
             log.info("splitter: bolla unica, nessuno split necessario")
+            # Anche senza split: l'OCR dell'header (ritaglio in alto) legge la
+            # ragione sociale meglio della pagina piena. La salviamo nel sidecar
+            # accanto al PDF originale, cosi' la pipeline la usa comunque.
+            _scrivi_sidecar(pdf_path, raw_headers[0] if raw_headers else "")
             return [pdf_path]
 
         out_dir = Path(work_dir) if work_dir else pdf_path.parent / f"split_{pdf_path.stem}"

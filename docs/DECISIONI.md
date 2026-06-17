@@ -132,6 +132,7 @@ Moduli sotto `src/bolle/`:
 | `--pages 1` / `1-3` / `1,5,7` | Elabora solo le pagine indicate |
 | `--reuse-ocr` | **Dev**: ricarica `.md` esistente, parte dal parser (secondi) |
 | `--fornitore "NOME"` | Forza il fornitore in testata (override) |
+| `--split-only` | Solo splitter: divide e scrive i sidecar fornitore (OCR solo header, veloce). Niente parsing |
 
 Esempio dev su una bolla gia' OCRata:
 ```
