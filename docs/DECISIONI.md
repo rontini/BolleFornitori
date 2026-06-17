@@ -81,9 +81,19 @@ Moduli sotto `src/bolle/`:
 8. **Raffinamento descrizione**: dopo aver estratto il commerciale, la
    descrizione viene ripulita al solo nome articolo (toglie metadati come
    "Nr. commessa", "Rif. Vs DDT", "Ordine ...").
-9. **Riconoscimento fornitore via pattern noti** (`fornitori_noti` in
-   `settings.yaml`): il primo pattern regex che matcha sul `.md` vince.
-   Override esplicito via `--fornitore "NOME"`.
+9. **Riconoscimento fornitore in cascata** (nessun input richiesto nei casi
+   normali):
+   1. `--fornitore "NOME"` (override CLI esplicito);
+   2. `fornitori_noti` configurati in `settings.yaml` (nome canonico esatto);
+   3. **regex generica** sul `.md`: cerca "NOME + s.r.l./S.p.A./srl/spa/...",
+      con lista di scarti per non beccare il cliente (CEFLA) o gli
+      spedizionieri ricorrenti;
+   4. **sidecar dello splitter** (`<stem>.meta.json` accanto al PDF
+      splittato): lo splitter, mentre legge l'header di ogni pagina per
+      dividere, salva anche la ragione sociale rilevata; la pipeline la usa
+      automaticamente. Risolve il caso in cui il `.md` del documento intero
+      non contiene la ragione sociale (es. bolla01 Verniciatura, dove Paddle
+      legge solo il destinatario CEFLA).
 10. **Modalita' di sviluppo `--reuse-ocr`**: ricarica il Markdown gia' salvato
     in `work/ocr_raw/<stem>.md` e parte dal parser. Iterazione in **secondi**
     invece di minuti, ideale per tarare parser/validazione.

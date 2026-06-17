@@ -65,6 +65,7 @@ def split_pdf(
 
         log.info("splitter: ispeziono %d pagine per rilevare i confini fra bolle", n_pages)
         infos = _scan_pages(doc, cfg)
+        raw_headers = [info[3] for info in infos]  # testo header per ogni pagina (per sidecar)
         boundaries = _boundaries_from_markers(_starts_from_scan(infos), n_pages)
 
         if len(boundaries) <= 1:
@@ -81,6 +82,11 @@ def split_pdf(
             sub_doc.insert_pdf(doc, from_page=start, to_page=end)
             sub_doc.save(sub_path)
             sub_doc.close()
+            # Sidecar: scrive accanto al PDF splittato la ragione sociale del
+            # fornitore (letta dall'header della prima pagina della bolla).
+            # La pipeline la riusa per popolare la testata anche quando il .md
+            # del documento intero non la contiene.
+            _scrivi_sidecar(sub_path, raw_headers[start] if start < len(raw_headers) else "")
             out_paths.append(sub_path)
             log.info(
                 "splitter: bolla %d/%d -> pagine %d-%d -> %s",
@@ -89,7 +95,23 @@ def split_pdf(
     return out_paths
 
 
-def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, int | None, str]]:
+def _scrivi_sidecar(pdf_path: Path, header_text: str) -> None:
+    """Scrive <stem>.meta.json accanto al PDF con il fornitore estratto."""
+    import json
+
+    from .header_extractor import _estrai_ragione_sociale
+
+    fornitore = _estrai_ragione_sociale(header_text)
+    if not fornitore:
+        return
+    sidecar = pdf_path.with_suffix(".meta.json")
+    sidecar.write_text(
+        json.dumps({"fornitore": fornitore}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, int | None, str, str]]:
     """Per ogni pagina: (numero nel marker 'Pagina N/M' se letto, impronta fornitore).
 
     L'impronta e' derivata dalle prime righe della trascrizione dell'header
@@ -104,7 +126,7 @@ def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, int | None, str]]
 
         paddle_engine = PaddleOcrVlEngine(cfg)
 
-    out: list[tuple[int | None, int | None, str]] = []
+    out: list[tuple[int | None, int | None, str, str]] = []
     for i in range(len(doc)):
         text = _ocr_top_of_page(doc[i], cfg, paddle_engine)
         page_num, total = _parse_marker(text)
@@ -112,7 +134,9 @@ def _scan_pages(doc, cfg: OcrConfig) -> list[tuple[int | None, int | None, str]]
         log.info(
             "splitter: pagina %d -> n=%s/%s, impronta '%s'", i + 1, page_num, total, fp
         )
-        out.append((page_num, total, fp))
+        # Tupla: (numero pagina nel marker, totale pagine, impronta, testo raw).
+        # Il testo raw e' usato per costruire il sidecar con la ragione sociale.
+        out.append((page_num, total, fp, text))
     return out
 
 
@@ -128,8 +152,10 @@ def _fingerprint(text: str) -> str:
     return alnum[:24]
 
 
-def _starts_from_scan(infos: list[tuple[int | None, int | None, str]]) -> list[int]:
+def _starts_from_scan(infos: list[tuple]) -> list[int]:
     """Indici 0-based delle pagine che iniziano una nuova bolla.
+
+    Accetta tuple a 3 elementi (num, total, fp) o 4 (con raw_text in coda).
 
     Regole:
       - marker 'Pagina 1/N' -> inizio bolla; se N e' noto, le successive N-1
@@ -142,7 +168,8 @@ def _starts_from_scan(infos: list[tuple[int | None, int | None, str]]) -> list[i
     starts: list[int] = []
     prev_fp: str | None = None
     expected_until = -1  # ultimo indice di continuazione attesa dal marker 1/N
-    for i, (num, total, fp) in enumerate(infos):
+    for i, info in enumerate(infos):
+        num, total, fp = info[0], info[1], info[2]
         if num == 1:
             starts.append(i)
             if total and total > 1:

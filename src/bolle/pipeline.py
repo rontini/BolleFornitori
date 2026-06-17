@@ -30,6 +30,20 @@ log = logging.getLogger("bolle.pipeline")
 _MARKDOWN_ENGINES = {"dots_ocr", "paddleocr_vl"}
 
 
+def _leggi_sidecar(pdf_path: Path) -> str | None:
+    """Legge il fornitore dal sidecar <stem>.meta.json scritto dallo splitter."""
+    import json
+
+    sidecar = pdf_path.with_suffix(".meta.json")
+    if not sidecar.exists():
+        return None
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data.get("fornitore")
+
+
 class _ApiResolver:
     """Adatta AziendaApi all'interfaccia CodiceResolver usata dalla validazione."""
 
@@ -88,6 +102,13 @@ class Pipeline:
                 fornitori_noti=self.cfg.ocr.fornitori_noti,
             )
             bolla.righe = self._parse_righe(ocr)
+
+        # Fornitore dal sidecar dello splitter (<stem>.meta.json accanto al
+        # PDF): popolato se l'estrazione automatica dal .md non l'ha trovato.
+        if bolla.testata.fornitore is None:
+            sidecar_fornitore = _leggi_sidecar(path)
+            if sidecar_fornitore:
+                bolla.testata.fornitore = sidecar_fornitore
 
         # Override esplicito del fornitore (precedenza su qualsiasi estrazione).
         if fornitore_override:

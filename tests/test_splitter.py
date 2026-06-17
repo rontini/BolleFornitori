@@ -137,6 +137,62 @@ def test_starts_bolla_singola_multipagina_stessa_impronta():
     assert _starts_from_scan([(None, None, fp), (None, None, fp), (None, None, fp)]) == []
 
 
+def test_sidecar_fornitore_scritto_dallo_splitter(tmp_path):
+    # _scrivi_sidecar legge il testo grezzo dell'header e salva la ragione
+    # sociale in <stem>.meta.json: la pipeline poi la usera' per popolare
+    # automaticamente testata.fornitore.
+    import json
+
+    from bolle.splitter import _scrivi_sidecar
+
+    pdf = tmp_path / "scan_bolla01.pdf"
+    pdf.write_bytes(b"fake-pdf")
+    _scrivi_sidecar(pdf, "SOFT Italia S.p.A.\nVia Roma 1\nDocumento di trasporto")
+
+    sidecar = pdf.with_suffix(".meta.json")
+    assert sidecar.exists()
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert "SOFT" in data["fornitore"]
+
+
+def test_pipeline_legge_sidecar_se_il_md_non_ha_il_fornitore(tmp_path):
+    # E2E: il sidecar accanto al PDF popola automaticamente testata.fornitore
+    # anche quando l'estrazione dal .md non trova nulla (caso bolla01: il
+    # modello non trascrive la ragione sociale).
+    import json
+
+    import pytest
+
+    from bolle.api_client import build_api
+    from bolle.config import Config
+    from bolle.pipeline import Pipeline
+
+    fitz = pytest.importorskip("fitz")
+    pdf = tmp_path / "scan_bolla01.pdf"
+    doc = fitz.open(); doc.new_page(); doc.save(pdf); doc.close()
+
+    # Sidecar gia' presente (come se lo splitter lo avesse scritto).
+    pdf.with_suffix(".meta.json").write_text(
+        json.dumps({"fornitore": "VERNICIATURA BOLOGNESE S.R.L."}),
+        encoding="utf-8",
+    )
+
+    # OCR gia' fatto in passato: nessuna ragione sociale nel .md.
+    work = tmp_path / "work"
+    (work / "ocr_raw").mkdir(parents=True)
+    (work / "ocr_raw" / f"{pdf.stem}.md").write_text(
+        "CEFLA S.C. MEDICAL EQUIPMENT\nIndirizzo spedizione\n",
+        encoding="utf-8",
+    )
+
+    cfg = Config(); cfg.paths.work = work; cfg.paths.review_queue = work / "revisione"
+    cfg.api.backend = "memory"
+    esito = Pipeline(cfg, build_api(cfg.api)).process(pdf, reuse_ocr=True)
+    # Verifica: il fornitore proviene dal sidecar.
+    out = json.loads((work / "output" / f"{pdf.stem}.json").read_text(encoding="utf-8"))
+    assert out["testata"]["fornitore"] == "VERNICIATURA BOLOGNESE S.R.L."
+
+
 def test_marker_1_su_n_blocca_falsi_split_da_impronta_variabile():
     # Caso PaddleOCR: il marker '1/5' e' letto sulla prima pagina, ma le
     # impronte delle pagine interne variano (l'OCR dell'header non e' stabile).

@@ -48,10 +48,16 @@ def extract_header(
             t = _extract_via_regex(full_text)
     else:
         t = _extract_via_regex(full_text)
-    # Riconoscimento fornitore via pattern noti (config-driven). Si applica solo
-    # se l'estrazione precedente non l'ha gia' popolato.
+    # Riconoscimento fornitore in cascata (il primo che trova qualcosa vince):
+    #   1. pattern noti dall'utente (config-driven, nomi canonici esatti)
+    #   2. ragione sociale italiana esplicita nel testo (s.r.l./S.p.A./...)
+    # Cosi' l'utente puo' sempre forzare un nome canonico (es. con maiuscole
+    # e abbreviazioni come le ha in anagrafica) anche quando la regex generica
+    # troverebbe una variante diversa nel testo OCR.
     if t.fornitore is None and fornitori_noti:
         t.fornitore = _riconosci_fornitore(full_text, fornitori_noti)
+    if t.fornitore is None:
+        t.fornitore = _estrai_ragione_sociale(full_text)
     return t
 
 
@@ -67,6 +73,44 @@ def _riconosci_fornitore(full_text: str, fornitori_noti: list[dict[str, str]]) -
                 return nome
         except re.error:
             continue  # pattern malformato in config: ignora invece di crashare
+    return None
+
+
+# Ragione sociale italiana con qualifica societaria (s.r.l., S.p.A., srl, snc,
+# soc. coop., ...). La qualifica esclude il cliente quando e' indicato come
+# "S.C." (es. "CEFLA S.C." → niente qualifica, non viene catturato).
+_RE_RAGIONE_SOCIALE = re.compile(
+    r"\b(?P<nome>[A-Z][A-Z0-9 .'\-&]{2,40}?)\s+"
+    r"(?P<qual>s\.?r\.?l\.?|s\.?p\.?a\.?|s\.?n\.?c\.?|s\.?a\.?s\.?|soc\.?\s*coop\.?)\b",
+    re.IGNORECASE,
+)
+# Termini da scartare: spesso il modello rende il destinatario come pseudo-fornitore
+# o ci sono noti spedizionieri che non sono il fornitore della merce.
+_SCARTI_RAGIONE_SOCIALE = (
+    "cefla",                     # cliente tipico nei DDT di esempio
+    "cuti", "consai",            # spedizionieri ricorrenti
+    "intesa", "san pa",          # banca pagamenti
+)
+
+
+def _estrai_ragione_sociale(full_text: str) -> str | None:
+    """Cerca nel testo la prima ragione sociale italiana con qualifica
+    societaria esplicita (s.r.l./s.p.a./srl/spa/snc/sas/soc. coop.).
+
+    Filtra i nomi che sono chiaramente cliente o spedizioniere (lista nota di
+    scarti). Funziona quando il modello ha trascritto la carta intestata;
+    sulle bolle dove il modello la salta, restituisce None (fallback ai
+    fornitori_noti o all'override CLI)."""
+    for m in _RE_RAGIONE_SOCIALE.finditer(full_text):
+        nome = re.sub(r"\s+", " ", m.group("nome")).strip()
+        if not nome:
+            continue
+        lower = nome.lower()
+        if any(s in lower for s in _SCARTI_RAGIONE_SOCIALE):
+            continue
+        # Compone "NOME S.R.L." normalizzando la qualifica
+        qual = m.group("qual").upper().replace(" ", "").rstrip(".")
+        return f"{nome} {qual}"
     return None
 
 

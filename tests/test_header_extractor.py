@@ -90,3 +90,26 @@ def test_fornitore_pattern_malformato_non_crasha():
     fornitori = [{"pattern": "[unclosed", "nome": "ROTTO"}, {"pattern": "ACME", "nome": "ACME"}]
     t = extract_header("ACME srl\n", _cfg(), fornitori_noti=fornitori)
     assert t.fornitore == "ACME"
+
+
+def test_estrazione_automatica_ragione_sociale_da_testo():
+    # Quando il modello trascrive "SOFT Italia S.p.A." la regex generica la
+    # cattura senza bisogno di fornitori_noti.
+    t = extract_header("SOFT Italia S.p.A.\nVia Roma 1\n", _cfg())
+    assert t.fornitore == "SOFT Italia S.P.A"
+
+
+def test_estrazione_automatica_scarta_il_cliente_CEFLA():
+    # CEFLA S.C. nei DDT e' il destinatario, non il fornitore: NON deve essere
+    # catturato dalla regex generica (S.C. non e' una qualifica societaria
+    # standard, e "cefla" e' nei termini di scarto).
+    md = "Indirizzo spedizione\nCEFLA S.C. MEDICAL EQUIPMENT\nVIA ...\n"
+    t = extract_header(md, _cfg())
+    assert t.fornitore is None
+
+
+def test_fornitori_noti_vincono_sulla_regex_generica():
+    # Se l'utente ha configurato un nome canonico, vince sulla regex generica.
+    fornitori = [{"pattern": "Verniciatura", "nome": "VERNICIATURA BOLOGNESE S.R.L."}]
+    t = extract_header("Verniciatura Bolognese s.r.l.\n", _cfg(), fornitori_noti=fornitori)
+    assert t.fornitore == "VERNICIATURA BOLOGNESE S.R.L."
