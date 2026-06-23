@@ -108,6 +108,15 @@ def test_estrazione_automatica_scarta_il_cliente_CEFLA():
     assert t.fornitore is None
 
 
+def test_estrazione_automatica_scarta_il_vettore_trasportatore():
+    # Caso reale bolla04 (Camozzi): "VETTORE TRASPORTATORE ARCO'S SPEDIZIONI SPA"
+    # ARCO'S SPEDIZIONI SPA e' una ragione sociale vera ma e' il vettore del
+    # trasporto, non il fornitore della merce -> deve essere scartato.
+    md = "DESTINATARIO\nCEFLA S.C.\n...\nVETTORE TRASPORTATORE ARCO'S SPEDIZIONI SPA\n"
+    t = extract_header(md, _cfg())
+    assert t.fornitore is None  # meglio null che sbagliato
+
+
 def test_fornitori_noti_vincono_sulla_regex_generica():
     # Se l'utente ha configurato un nome canonico, vince sulla regex generica.
     fornitori = [{"pattern": "Verniciatura", "nome": "VERNICIATURA BOLOGNESE S.R.L."}]

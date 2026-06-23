@@ -85,11 +85,14 @@ _RE_RAGIONE_SOCIALE = re.compile(
     re.IGNORECASE,
 )
 # Termini da scartare: spesso il modello rende il destinatario come pseudo-fornitore
-# o ci sono noti spedizionieri che non sono il fornitore della merce.
+# o ci sono noti spedizionieri/vettori che non sono il fornitore della merce.
 _SCARTI_RAGIONE_SOCIALE = (
-    "cefla",                     # cliente tipico nei DDT di esempio
-    "cuti", "consai",            # spedizionieri ricorrenti
-    "intesa", "san pa",          # banca pagamenti
+    "cefla",                       # cliente tipico nei DDT di esempio
+    "cuti", "consai",              # spedizionieri ricorrenti
+    "intesa", "san pa",            # banca pagamenti
+    "vettore", "trasportatore",    # label del trasportatore, non del fornitore
+    "incaricato",                  # "INCARICATO TRASPORTO" sopra al vettore
+    "destinatario", "mittente",    # label di indirizzo, non ragione sociale
 )
 
 
