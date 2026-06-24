@@ -93,6 +93,8 @@ _SCARTI_RAGIONE_SOCIALE = (
     "vettore", "trasportatore",    # label del trasportatore, non del fornitore
     "incaricato",                  # "INCARICATO TRASPORTO" sopra al vettore
     "destinatario", "mittente",    # label di indirizzo, non ragione sociale
+    "destination", "designation",  # OCR errato di "destinazione" o simili
+    "luogo",                       # "LUOGO DESTINAZIONE" prima del nome
 )
 
 
@@ -153,19 +155,27 @@ _RE_ORDINE_CLIENTE = re.compile(
 _RE_ORDINE_FORN = re.compile(
     r"\bordine\b[^\n]{0,30}?([A-Z0-9][A-Z0-9/\-]{2,})", re.I
 )
-# Numero della bolla/DDT: richiede che la cattura COMINCI con una cifra, cosi'
-# non agganciamo per sbaglio parole tipo "trasporto" dopo "Documento di...".
-# Il gap puo' scavalcare un newline perche' spesso "Documento di trasporto" e
-# il "Nr. ..." sono su righe diverse. Minimo 4 caratteri: esclude il "472" di
-# "(D.P.R. N. 472 del 14/8/96)" stampato su molti DDT.
-_RE_BOLLA = re.compile(
-    r"(?:bolla|ddt|d\.d\.t\.?|documento)[\s\S]{0,40}?(\d[A-Z0-9/\-]{3,})", re.I
-)
+# Numero della bolla/DDT: cerca tutti i candidati nei pressi di una
+# parola-trigger ("documento", "bolla", "ddt"...), scartando quelli che
+# sembrano date (i DDT stampano spesso "(D.P.R. 14.08.1996 n. 472)" che
+# matcherebbe "1996" come primo candidato).
+_RE_TRIGGER_BOLLA = re.compile(r"(?:\bbolla\b|\bddt\b|\bd\.d\.t\.?\b|\bdocumento\b)", re.I)
+_RE_CANDIDATO_BOLLA = re.compile(r"\d[A-Z0-9/\-]{3,}", re.I)
 _RE_DATA = re.compile(r"(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})")
 
 # Solo date di lavoro plausibili: esclude i riferimenti normativi stampati sui
 # DDT ("D.P.R. ... del 14/8/96" -> 1996/2096) e altri rumori OCR.
 _ANNO_MIN, _ANNO_MAX = 2015, 2049
+
+# Token che ASSOMIGLIANO a date (per il numero bolla scartiamo questi falsi
+# positivi pescati dalla dicitura "D.P.R. 14.08.1996 n. 472" sui DDT).
+_RE_SOMIGLIA_A_DATA = re.compile(
+    r"^(?:\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}|19\d{2}|20\d{2})$"
+)
+
+
+def _e_data_o_anno(testo: str) -> bool:
+    return bool(_RE_SOMIGLIA_A_DATA.match(testo.strip()))
 
 
 def _extract_via_regex(full_text: str) -> Testata:
@@ -177,8 +187,19 @@ def _extract_via_regex(full_text: str) -> Testata:
     cleaned = _RE_ORDINE_CLIENTE.sub("VOSTRO_ORDINE", full_text)
     if m := _RE_ORDINE_FORN.search(cleaned):
         t.numero_ordine_fornitore = m.group(1)
-    if m := _RE_BOLLA.search(full_text):
-        t.numero_bolla = m.group(1)
+    # Per ogni trigger ("documento", "bolla", "ddt") guarda i candidati nei
+    # 200 char successivi e prende il primo che NON sia una data. Cosi'
+    # superiamo "(D.P.R. 14.08.1996 n. 472)" e arriviamo a "Nr. 26DT-01997".
+    for trigger in _RE_TRIGGER_BOLLA.finditer(full_text):
+        finestra = full_text[trigger.end(): trigger.end() + 200]
+        for cand in _RE_CANDIDATO_BOLLA.finditer(finestra):
+            valore = cand.group(0)
+            if _e_data_o_anno(valore):
+                continue
+            t.numero_bolla = valore
+            break
+        if t.numero_bolla:
+            break
     # Prima data con anno plausibile (non la prima in assoluto).
     for m in _RE_DATA.finditer(full_text):
         d, mo, y = (int(x) for x in m.groups())

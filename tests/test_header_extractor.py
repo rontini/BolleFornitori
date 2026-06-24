@@ -108,6 +108,30 @@ def test_estrazione_automatica_scarta_il_cliente_CEFLA():
     assert t.fornitore is None
 
 
+def test_numero_bolla_non_pesca_anno_dal_dpr():
+    # Caso reale bolla04/05: "DOCUMENTO DI TRASPORTO (D.P.R. 14.08.1996 n. 472)"
+    # produceva numero_bolla="1996". Ora viene scartato e si prende il vero
+    # numero se presente, altrimenti None.
+    md = "DOCUMENTO DI TRASPORTO (D.P.R. 14.08.1996 n. 472)\nNr. 26DT-01997 Data 27/05/2026\n"
+    t = extract_header(md, _cfg())
+    assert t.numero_bolla == "26DT-01997"
+
+
+def test_numero_bolla_non_pesca_data_dal_dpr_472():
+    # Caso reale bolla02 (SOFT): "DOCUMENTO DI TRASPORTO (D.P.R. N. 472 del 14/8/96)"
+    # produceva numero_bolla="14/8/96".
+    md = "DOCUMENTO DI TRASPORTO (D.P.R. N. 472 del 14/8/96)\n"
+    t = extract_header(md, _cfg())
+    assert t.numero_bolla is None
+
+
+def test_destination_designation_scartati_dai_fornitori():
+    # Caso reale bolla05 (Camozzi): "DESIGNATION SPA" pescato per sbaglio.
+    md = "LUOGO DESTINAZIONE\nDESIGNATION SPA\nCEFLA S.C.\n"
+    t = extract_header(md, _cfg())
+    assert t.fornitore is None  # meglio null che sbagliato
+
+
 def test_estrazione_automatica_scarta_il_vettore_trasportatore():
     # Caso reale bolla04 (Camozzi): "VETTORE TRASPORTATORE ARCO'S SPEDIZIONI SPA"
     # ARCO'S SPEDIZIONI SPA e' una ragione sociale vera ma e' il vettore del
