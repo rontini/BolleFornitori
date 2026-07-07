@@ -100,3 +100,8 @@ class EsitoRiconciliazione:
     numero_ordine_fornitore: str | None = None           # ordine interno del fornitore
     proposte: list[Proposta] = field(default_factory=list)
     righe_in_revisione: list[RigaBolla] = field(default_factory=list)
+    # Dati di sintesi per il riepilogo di lotto (compilati da riconcilia()).
+    documento_id: str | None = None
+    fornitore: str | None = None
+    totale_righe: int = 0
+    righe_risolte: int = 0

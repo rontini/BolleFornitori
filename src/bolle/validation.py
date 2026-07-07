@@ -73,7 +73,19 @@ def _risolvi_codice(riga: RigaBolla, fornitore: str | None, resolver: CodiceReso
         return
 
     riga.risolto = False
-    riga.note.append("codice non risolvibile (cross-ref/anagrafica): probabile errore OCR")
+    if riga.codice_commerciale:
+        # Il codice commerciale e' stato letto ma non trovato in anagrafica:
+        # o l'anagrafica non e' raggiungibile (backend memory / API giu') o il
+        # codice non esiste davvero. NON e' un indizio di errore OCR.
+        riga.note.append(
+            f"codice commerciale {riga.codice_commerciale} senza riscontro in anagrafica"
+        )
+    else:
+        # Nessun codice commerciale leggibile e nessun riscontro: qui un errore
+        # di lettura OCR e' plausibile.
+        riga.note.append(
+            "codice senza riscontro in cross-reference/anagrafica (possibile errore OCR)"
+        )
 
 
 def _valida_aritmetica(riga: RigaBolla) -> None:

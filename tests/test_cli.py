@@ -135,3 +135,49 @@ def test_flag_no_split_disattiva_lo_splitter(tmp_path, monkeypatch):
 
     cli.main(["--no-split", str(pdf)])
     assert chiamato["split"] is False, "lo splitter non doveva essere chiamato con --no-split"
+
+
+def test_riepilogo_di_lotto_scritto_su_file(tmp_path, capsys):
+    """_stampa_riepilogo produce la tabella a console e il JSON aggregato."""
+    import json
+
+    from bolle.cli import _stampa_riepilogo
+    from bolle.models import EsitoRiconciliazione, RigaBolla
+
+    esiti = [
+        EsitoRiconciliazione(
+            numero_ordine="ORD1",
+            documento_id="bolla01",
+            fornitore="ACME SRL",
+            totale_righe=10,
+            righe_risolte=8,
+            righe_in_revisione=[RigaBolla(1, "X"), RigaBolla(2, "Y")],
+        ),
+        EsitoRiconciliazione(
+            numero_ordine=None,
+            documento_id="bolla02",
+            fornitore=None,
+            totale_righe=3,
+            righe_risolte=0,
+            righe_in_revisione=[],
+        ),
+    ]
+    out = tmp_path / "riepilogo.json"
+    _stampa_riepilogo(esiti, errori=["bolla_rotta.pdf"], out_path=out)
+
+    stampa = capsys.readouterr().out
+    assert "bolla01" in stampa and "ACME SRL" in stampa
+    assert "ERRORE: bolla_rotta.pdf" in stampa
+
+    dati = json.loads(out.read_text(encoding="utf-8"))
+    assert dati["totali"] == {"bolle": 2, "righe": 13, "risolte": 8, "in_revisione": 2}
+    assert dati["errori"] == ["bolla_rotta.pdf"]
+    assert dati["bolle"][0]["righe_in_revisione"] == 2
+
+
+def test_env_override_backend(monkeypatch):
+    from bolle.config import Config
+
+    monkeypatch.setenv("BOLLE_API_BACKEND", "memory")
+    cfg = Config.load(None)
+    assert cfg.api.backend == "memory"

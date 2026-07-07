@@ -134,13 +134,18 @@ Moduli sotto `src/bolle/`:
 | `--fornitore "NOME"` | Forza il fornitore in testata (override) |
 | `--split-only` | Solo splitter: divide e scrive i sidecar fornitore (OCR solo header, veloce). Niente parsing |
 
+A fine lotto (piu' bolle o errori) la CLI stampa una tabella di riepilogo e
+scrive `work/riepilogo.json` (righe totali/risolte/in revisione per bolla).
+Override via env: `BOLLE_API_BACKEND`, `BOLLE_API_BASE_URL`, `BOLLE_API_TOKEN`.
+
 Esempio dev su una bolla gia' OCRata:
 ```
 python -m bolle.cli --config config\settings.yaml --reuse-ocr work\split\bolla.pdf
 ```
 
 ## 7. Prossimi passi (in ordine consigliato)
-1. **Contratto API Oracle**: endpoint, payload, autenticazione (oggi
+1. **Contratto API Oracle**: BOZZA PRONTA in `docs/API_ORACLE.md` (endpoint,
+   payload, esempi, domande aperte per l'IT). Da condividere e validare (oggi
    `backend: memory`). E' il vero sblocco: senza, le righe restano in
    revisione anche se i dati sono giusti. Le API dovranno esporre l'anagrafica
    (per validare i codici commerciali) e gli ordini (per la riconciliazione).

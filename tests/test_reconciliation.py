@@ -67,3 +67,27 @@ def test_riga_non_risolta_va_in_revisione():
     esito = riconcilia(bolla, api)
     assert len(esito.righe_in_revisione) == 1
     assert not esito.righe_in_revisione[0].risolto
+
+
+def test_esito_contiene_dati_di_sintesi_per_riepilogo():
+    api = InMemoryAziendaApi(
+        crossref={("ACME", "F-1"): "INT-1"},
+        righe_ordine={"ORD100": [RigaOrdine("ORD100", "INT-1", Decimal(10))]},
+    )
+    bolla = Bolla(
+        documento_id="DDT42",
+        kind=DocumentKind.PDF_TEXT,
+        testata=Testata(numero_ordine="ORD100", fornitore="ACME"),
+        righe=[
+            RigaBolla(1, "F-1", quantita=Decimal(7)),
+            RigaBolla(2, "IGNOTO", quantita=Decimal(1)),
+        ],
+    )
+    valida_bolla(bolla, _Resolver(api))
+    esito = riconcilia(bolla, api)
+
+    assert esito.documento_id == "DDT42"
+    assert esito.fornitore == "ACME"
+    assert esito.totale_righe == 2
+    assert esito.righe_risolte == 1
+    assert len(esito.righe_in_revisione) == 1

@@ -142,6 +142,15 @@ La pipeline scrive tre file per ogni documento:
 - `work\revisione\<stem>.json` — solo le righe non risolte (per la coda di
   revisione manuale).
 
+Quando la run elabora **più bolle** (o ci sono errori), a fine lotto viene
+stampata una **tabella di riepilogo** (righe totali/risolte/in revisione per
+bolla) e scritto `work\riepilogo.json` con gli stessi dati aggregati.
+
+### Contratto API Oracle
+La bozza del contratto per l'IT (endpoint, payload JSON, esempi, domande
+aperte) è in **`docs/API_ORACLE.md`**: il client corrispondente è già
+implementato in `src/bolle/api_client.py`.
+
 ## Test
 ```cmd
 pytest

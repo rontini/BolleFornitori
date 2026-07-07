@@ -92,6 +92,8 @@ class Config:
             self.api.base_url = v
         if v := os.environ.get("BOLLE_API_TOKEN"):
             self.api.token = v
+        if v := os.environ.get("BOLLE_API_BACKEND"):
+            self.api.backend = v  # http | memory, senza toccare settings.yaml
         if v := os.environ.get("BOLLE_LLM_BASE_URL"):
             self.llm.base_url = v
 

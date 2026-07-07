@@ -89,3 +89,26 @@ def test_aritmetica_fallita_manda_in_revisione():
     in_rev = valida_bolla(bolla, _Resolver(api))
     assert len(in_rev) == 1
     assert any("aritmetica" in n for n in in_rev[0].note)
+
+
+def test_nota_differenziata_con_e_senza_codice_commerciale():
+    # Con codice commerciale letto ma senza riscontro: la nota NON deve
+    # suggerire un errore OCR (il codice e' plausibile, e' la risoluzione
+    # che non ha dato esito - es. backend memory o codice non in anagrafica).
+    api = InMemoryAziendaApi()
+    bolla = Bolla(
+        documento_id="D",
+        kind=DocumentKind.PDF_TEXT,
+        testata=Testata(fornitore="ACME"),
+        righe=[
+            RigaBolla(1, "088608.0401", codice_commerciale="99928399"),
+            RigaBolla(2, "SCONOSCIUTO"),
+        ],
+    )
+    valida_bolla(bolla, _Resolver(api))
+
+    nota_con_commerciale = bolla.righe[0].note[0]
+    nota_senza = bolla.righe[1].note[0]
+    assert "99928399" in nota_con_commerciale
+    assert "errore OCR" not in nota_con_commerciale
+    assert "possibile errore OCR" in nota_senza

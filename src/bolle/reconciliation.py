@@ -31,10 +31,14 @@ def riconcilia(bolla: Bolla, api: AziendaApi) -> EsitoRiconciliazione:
     esito = EsitoRiconciliazione(
         numero_ordine=numero_ordine,
         numero_ordine_fornitore=bolla.testata.numero_ordine_fornitore,
+        documento_id=bolla.documento_id,
+        fornitore=bolla.testata.fornitore,
     )
 
     risolte = [r for r in bolla.righe if r.risolto and r.codice_interno]
     esito.righe_in_revisione = [r for r in bolla.righe if not r.risolto]
+    esito.totale_righe = len(bolla.righe)
+    esito.righe_risolte = len(risolte)
 
     if not numero_ordine:
         # Senza ancora d'ordine non possiamo abbinare: tutto in revisione.

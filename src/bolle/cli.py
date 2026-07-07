@@ -8,14 +8,73 @@ Esempi:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
 
 from .api_client import build_api
 from .config import Config
+from .models import EsitoRiconciliazione
 from .pipeline import Pipeline
 from .splitter import split_pdf
+
+
+def _stampa_riepilogo(esiti: list[EsitoRiconciliazione], errori: list[str], out_path: Path) -> None:
+    """Tabella di riepilogo a fine lotto + dump JSON in work/riepilogo.json.
+
+    Con ~100 bolle/giorno serve una vista aggregata: quante righe risolte,
+    quante in revisione, quali documenti sono andati in errore - senza aprire
+    un file JSON per bolla.
+    """
+    if not esiti and not errori:
+        return
+
+    print("\n" + "=" * 78)
+    print(f"{'documento':32} {'fornitore':22} {'righe':>6} {'ok':>4} {'rev':>4}")
+    print("-" * 78)
+    tot_righe = tot_ok = tot_rev = 0
+    for e in esiti:
+        doc = (e.documento_id or "?")[:32]
+        forn = (e.fornitore or "-")[:22]
+        n_rev = len(e.righe_in_revisione)
+        print(f"{doc:32} {forn:22} {e.totale_righe:>6} {e.righe_risolte:>4} {n_rev:>4}")
+        tot_righe += e.totale_righe
+        tot_ok += e.righe_risolte
+        tot_rev += n_rev
+    print("-" * 78)
+    print(f"{'TOTALE':32} {len(esiti):>3} bolle{'':13} {tot_righe:>6} {tot_ok:>4} {tot_rev:>4}")
+    for doc in errori:
+        print(f"  ERRORE: {doc}")
+    print("=" * 78)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "bolle": [
+            {
+                "documento_id": e.documento_id,
+                "fornitore": e.fornitore,
+                "numero_ordine": e.numero_ordine,
+                "numero_ordine_fornitore": e.numero_ordine_fornitore,
+                "totale_righe": e.totale_righe,
+                "righe_risolte": e.righe_risolte,
+                "righe_in_revisione": len(e.righe_in_revisione),
+                "proposte": len(e.proposte),
+            }
+            for e in esiti
+        ],
+        "errori": errori,
+        "totali": {
+            "bolle": len(esiti),
+            "righe": tot_righe,
+            "risolte": tot_ok,
+            "in_revisione": tot_rev,
+        },
+    }
+    out_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"riepilogo salvato in {out_path}")
 
 
 def _parse_pages(spec: str | None) -> list[int] | None:
@@ -86,18 +145,33 @@ def main(argv: list[str] | None = None) -> int:
     # Modalita' "solo split": divide il PDF e scrive i sidecar (fornitore),
     # senza OCR/parsing. Utile per (ri)generare i collegamenti fornitore.
     if args.split_only:
+        exit_code = 0
         for doc in args.documenti:
-            parti = split_pdf(Path(doc), cfg.ocr, work_dir=cfg.paths.work / "split")
+            try:
+                parti = split_pdf(Path(doc), cfg.ocr, work_dir=cfg.paths.work / "split")
+            except Exception as exc:  # noqa: BLE001 - un file non blocca il lotto
+                logging.getLogger("bolle.cli").exception("split fallito su %s: %s", doc, exc)
+                exit_code = 1
+                continue
             for p in parti:
                 meta = p.with_suffix(".meta.json")
                 forn = ""
                 if meta.exists():
-                    import json
                     forn = json.loads(meta.read_text(encoding="utf-8")).get("fornitore", "")
                 print(f"  {p}  ->  fornitore: {forn or '(non rilevato)'}")
-        return 0
+        return exit_code
+
+    if pages is not None and args.reuse_ocr:
+        # Il .md riusato contiene le pagine dell'OCR precedente: --pages non
+        # puo' filtrarle a posteriori. Meglio dirlo che ignorarlo in silenzio.
+        logging.getLogger("bolle.cli").warning(
+            "--pages viene ignorato con --reuse-ocr: il .md riusato contiene "
+            "le pagine dell'OCR originale"
+        )
 
     exit_code = 0
+    esiti: list[EsitoRiconciliazione] = []
+    errori: list[str] = []
     for doc in args.documenti:
         # Splitter: saltiamo se l'utente ha passato --no-split o --reuse-ocr
         # (in entrambi i casi sta lavorando su un file gia' singolo), o --pages
@@ -123,16 +197,23 @@ def main(argv: list[str] | None = None) -> int:
                     fornitore_override=args.fornitore,
                 )
                 print(
-                    f"\n=== {sub} (ordine cliente {esito.numero_ordine} | "
+                    f"\n=== {sub} (fornitore {esito.fornitore or '-'} | "
+                    f"ordine cliente {esito.numero_ordine} | "
                     f"ordine fornitore {esito.numero_ordine_fornitore}) ==="
                 )
                 for p in esito.proposte:
                     print(f"  [{p.tipo.value}] {p.codice_interno or ''} {p.dettaglio}")
                 if esito.righe_in_revisione:
                     print(f"  righe in revisione: {len(esito.righe_in_revisione)}")
+                esiti.append(esito)
             except Exception as exc:  # noqa: BLE001 - un documento non deve bloccare il flusso
                 logging.getLogger("bolle.cli").exception("errore su %s: %s", sub, exc)
+                errori.append(str(sub))
                 exit_code = 1
+
+    # Riepilogo di lotto: sempre se c'e' piu' di una bolla o ci sono errori.
+    if len(esiti) > 1 or errori:
+        _stampa_riepilogo(esiti, errori, cfg.paths.work / "riepilogo.json")
     return exit_code
 
 
